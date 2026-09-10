@@ -1,0 +1,1150 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * @fileoverview UpgradesScreen — дерево прокачки + характеристики.
+     5→ *
+     6→ * Две вкладки:
+     7→ * 1. «ДЕРЕВО ПРОКАЧКИ» — интерактивное дерево с узлами улучшений:
+     8→ *    - Базовый узел (🌌) в центре
+     9→ *    - 4 цветные ветки: Нападение (розовый), Крит (оранжевый), Защита (зелёный), Экономика (голубой)
+    10→ *    - Сателлитные узлы: Мини магнит (под Боезапас), Ударная волна (под Защиту), Двойные ядра (в голубой ветке)
+    11→ *    - Линии соединения с многослойными анимациями (свечение, поток энергии, орбы)
+    12→ *    - Поддержка pan/zoom (колёсико мыши + перетаскивание)
+    13→ *
+    14→ * 2. «ХАРАКТЕРИСТИКИ» — детальные карточки статов с базовым→финальным значением
+    15→ *
+    16→ * Структура улучшений:
+    17→ * - BRANCHES: основные ветки (4 шт.)
+    18→ * - SATELLITE_NODES: ответвления (могут требовать requiresAll — все узлы ветки на MAX)
+    19→ * - ALL_UPGRADE_ITEMS: плоский массив всех улучшений для поиска
+    20→ *
+    21→ * @see config.ts → GAME_CONFIG.maxLevels — максимальные уровни
+    22→ * @see Index.tsx → handleUpgrade — обработка покупки
+    23→ */
+    24→
+    25→import React, { useState, useEffect, useRef, useCallback } from 'react';
+    26→import { GameProgress } from '@/types/game';
+    27→import { audio } from '@/game/audioManager';
+    28→import { SpaceCoreIcon } from '@/components/SpaceCoreIcon';
+    29→import { useLanguage } from '@/i18n/LanguageContext';
+    30→import type { TFn } from '@/i18n/types';
+    31→
+    32→interface UpgradesScreenProps {
+    33→  progress: GameProgress;
+    34→  onUpgrade: (key: keyof GameProgress['upgrades'], cost: number) => void;
+    35→  onBack: () => void;
+    36→}
+    37→
+    38→type UpgradeKey = keyof GameProgress['upgrades'];
+    39→
+    40→interface UpgradeItem {
+    41→  key: UpgradeKey;
+    42→  name: string;
+    43→  desc: React.ReactNode;
+    44→  requires: UpgradeKey | null;
+    45→  icon: string;
+    46→  maxLevel: number;
+    47→  costs: number[];
+    48→  requiresMax?: boolean; // if true, the requirement must be at MAX level (not just 1)
+    49→  requiresAll?: UpgradeKey[]; // if present, ALL listed keys must be at MAX level
+    50→}
+    51→
+    52→const BASE_NODE: UpgradeItem & { color: string } = {
+    53→  key: 'baseNode',
+    54→  name: 'Ядро Синхронизации',
+    55→  desc: 'Открывает доступ к веткам прокачки',
+    56→  requires: null,
+    57→  icon: '🌌',
+    58→  maxLevel: 1,
+    59→  costs: [20],
+    60→  color: '#eab308' // Yellow/Gold
+    61→};
+    62→
+    63→const BRANCHES: { color: string; items: UpgradeItem[] }[] = [
+    64→  {
+    65→    color: '#ff006e',
+    66→    items: [
+    67→      { key: 'damage', name: 'Урон', desc: '+15% урона за уровень', requires: 'baseNode', icon: '⚔️', maxLevel: 5, costs: [50, 150, 300, 600, 1200] },
+    68→      { key: 'maxArrows', name: 'Боезапас', desc: '+1 стрела в колчане', requires: 'damage', icon: '🏹', maxLevel: 5, costs: [40, 100, 200, 400, 800] },
+    69→      { key: 'reloadSpeed', name: 'Перезарядка', desc: '-5% время перезарядки', requires: 'maxArrows', icon: '⚡', maxLevel: 5, costs: [60, 120, 250, 500, 1000] },
+    70→      { key: 'projectileSpeed', name: 'Скорость стрел', desc: '+5% скорость полета', requires: 'reloadSpeed', icon: '☄️', maxLevel: 5, costs: [50, 100, 200, 400, 800] },
+    71→      { key: 'piercing', name: 'Пробивание', desc: '+1 враг на вылет', requires: 'projectileSpeed', icon: '🌪️', maxLevel: 3, costs: [300, 800, 2000] },
+    72→    ]
+    73→  },
+    74→  {
+    75→    color: '#ffaa00',
+    76→    items: [
+    77→      { key: 'critChance', name: 'Крит. Шанс', desc: '+3% шанс крита', requires: 'baseNode', icon: '🎯', maxLevel: 5, costs: [80, 160, 320, 600, 1200] },
+    78→      { key: 'critDamage', name: 'Крит. Урон', desc: '+15% крит. урона', requires: 'critChance', icon: '💥', maxLevel: 5, costs: [100, 250, 500, 1000, 2000] },
+    79→    ]
+    80→  },
+    81→  {
+    82→    color: '#00ff41',
+    83→    items: [
+    84→      { key: 'maxHp', name: 'Прочность', desc: '+5 макс. HP за уровень', requires: 'baseNode', icon: '🛡️', maxLevel: 5, costs: [30, 80, 150, 300, 600] },
+    85→      { key: 'regenSpeed', name: 'Регенерация', desc: '+5% скорость регенерации', requires: 'maxHp', icon: '💖', maxLevel: 5, costs: [50, 120, 250, 500, 1000] },
+    86→      { key: 'defense', name: 'Броня', desc: '-3% получаемого урона', requires: 'regenSpeed', icon: '🦾', maxLevel: 5, costs: [80, 200, 400, 800, 1600] },
+    87→    ]
+    88→  },
+    89→  {
+    90→    color: '#00ffff',
+    91→    items: [
+    92→      { key: 'coreBonus', name: 'Сборщик', desc: <>+5% добыча <SpaceCoreIcon className="w-3.5 h-3.5 inline-block align-text-bottom mx-0.5" /> косм. ядер</>, requires: 'baseNode', icon: '💎', maxLevel: 5, costs: [40, 100, 250, 500, 1000] },
+    93→      { key: 'doubleCores', name: 'Двойные ядра', desc: <>Шанс получить ×2 <SpaceCoreIcon className="w-3.5 h-3.5 inline-block align-text-bottom mx-0.5" /> косм. ядер с врага (кроме босса)</>, requires: 'coreBonus', icon: '✨', maxLevel: 5, costs: [120, 300, 600, 1200, 2500] },
+    94→    ]
+    95→  }
+    96→];
+    97→
+    98→// Satellite nodes branch off a parent node at a perpendicular offset.
+    99→// They use the parent's branch color and are positioned relative to the parent.
+   100→// `linkFrom` specifies which nodes draw connection lines to this satellite
+   101→// (defaults to [item.requires]); used when a node has multiple parents.
+   102→const SATELLITE_NODES: { item: UpgradeItem; parentKey: UpgradeKey; color: string; offsetX: number; offsetY: number; linkFrom?: UpgradeKey[] }[] = [
+   103→  {
+   104→    item: {
+   105→      key: 'magnetArrow',
+   106→      name: 'Мини магнит',
+   107→      desc: 'Последняя стрела в колчане слегка магнитится к врагам, увеличивая шанс попадания',
+   108→      requires: 'maxArrows',
+   109→      requiresMax: true,
+   110→      icon: '🧲',
+   111→      maxLevel: 1,
+   112→      costs: [500],
+   113→    },
+   114→    parentKey: 'maxArrows',
+   115→    color: '#ff006e',
+   116→    offsetX: 0,
+   117→    offsetY: 170, // below maxArrows
+   118→  },
+   119→  {
+   120→    item: {
+   121→      key: 'shockwave',
+   122→      name: 'Ударная волна',
+   123→      desc: 'При получении урона лук испускает ударную волну, отбрасывающую врагов во все стороны',
+   124→      requires: 'defense',
+   125→      requiresMax: true,
+   126→      requiresAll: ['maxHp', 'regenSpeed', 'defense'],
+   127→      icon: '💥',
+   128→      maxLevel: 1,
+   129→      costs: [1500],
+   130→    },
+   131→    parentKey: 'regenSpeed', // positioned below the middle green node for clean converging lines
+   132→    color: '#00ff41',
+   133→    offsetX: 0,
+   134→    offsetY: 230, // below the green line
+   135→    linkFrom: ['maxHp', 'regenSpeed', 'defense'], // lines from all 3 green nodes
+   136→  },
+   137→];
+   138→
+   139→// Flatten all upgrade items (main chain + satellites) for lookups
+   140→const ALL_UPGRADE_ITEMS: (UpgradeItem & { color: string })[] = [
+   141→  { ...BASE_NODE, color: BASE_NODE.color },
+   142→  ...BRANCHES.flatMap(b => b.items.map(i => ({ ...i, color: b.color }))),
+   143→  ...SATELLITE_NODES.map(s => ({ ...s.item, color: s.color })),
+   144→];
+   145→
+   146→const CONTENT_SIZE = 1800;
+   147→const CENTER = CONTENT_SIZE / 2;
+   148→const MIN_ZOOM = 0.4;
+   149→const MAX_ZOOM = 2.6;
+   150→
+   151→const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
+   152→
+   153→// ===== Stats tab types & helpers =====
+   154→
+   155→interface StatDef {
+   156→  key: string;
+   157→  icon: string;
+   158→  name: string;
+   159→  level: number;
+   160→  maxLevel: number;
+   161→  baseLabel: string;
+   162→  finalLabel: string;
+   163→  desc: string;
+   164→}
+   165→
+   166→interface StatCategoryDef {
+   167→  id: string;
+   168→  icon: string;
+   169→  name: string;
+   170→  color: string;
+   171→  stats: StatDef[];
+   172→}
+   173→
+   174→function buildStatCategories(up: GameProgress['upgrades'], t: TFn): StatCategoryDef[] {
+   175→  const u = (k: keyof GameProgress['upgrades']) => up[k] || 0;
+   176→  const v = (key: string, params?: Record<string, string | number>) => t('upgrades.value.' + key, params);
+   177→  return [
+   178→    {
+   179→      id: 'attack',
+   180→      icon: '⚔️',
+   181→      name: t('upgrades.cat.attack'),
+   182→      color: '#ff006e',
+   183→      stats: [
+   184→        { key: 'damage', icon: '⚔️', name: t('upgrades.stat.damageMult'), level: u('damage'), maxLevel: 5,
+   185→          baseLabel: '×1.00', finalLabel: `×${(1 + u('damage') * 0.15).toFixed(2)}`, desc: t('upgrades.statdesc.damageMult') },
+   186→        { key: 'maxArrows', icon: '🏹', name: t('upgrades.stat.ammo'), level: u('maxArrows'), maxLevel: 5,
+   187→          baseLabel: `10 ${v('arrows')}`, finalLabel: `${10 + u('maxArrows')} ${v('arrows')}`, desc: t('upgrades.statdesc.ammo') },
+   188→        { key: 'reloadSpeed', icon: '⚡', name: t('upgrades.stat.reload'), level: u('reloadSpeed'), maxLevel: 5,
+   189→          baseLabel: '3.0s', finalLabel: `${(3 * Math.max(0.1, 1 - u('reloadSpeed') * 0.05)).toFixed(1)}s`, desc: t('upgrades.statdesc.reload') },
+   190→        { key: 'projectileSpeed', icon: '☄️', name: t('upgrades.stat.projSpeed'), level: u('projectileSpeed'), maxLevel: 5,
+   191→          baseLabel: '100%', finalLabel: `+${u('projectileSpeed') * 5}%`, desc: t('upgrades.statdesc.projSpeed') },
+   192→        { key: 'piercing', icon: '🌪️', name: t('upgrades.stat.pierce'), level: u('piercing'), maxLevel: 3,
+   193→          baseLabel: `0 ${v('pierceEnemiesZero')}`, finalLabel: `${u('piercing')} ${v('pierceEnemies')}`, desc: t('upgrades.statdesc.pierce') },
+   194→        { key: 'magnetArrow', icon: '🧲', name: t('upgrades.stat.magnet'), level: u('magnetArrow'), maxLevel: 1,
+   195→          baseLabel: v('none'), finalLabel: u('magnetArrow') > 0 ? v('lastArrow') : v('none'), desc: t('upgrades.statdesc.magnet') },
+   196→      ],
+   197→    },
+   198→    {
+   199→      id: 'critical',
+   200→      icon: '🎯',
+   201→      name: t('upgrades.cat.critical'),
+   202→      color: '#ffaa00',
+   203→      stats: [
+   204→        { key: 'critChance', icon: '🎯', name: t('upgrades.stat.critChance'), level: u('critChance'), maxLevel: 5,
+   205→          baseLabel: '5%', finalLabel: `${(5 + u('critChance') * 3)}%`, desc: t('upgrades.statdesc.critChance') },
+   206→        { key: 'critDamage', icon: '💥', name: t('upgrades.stat.critDamage'), level: u('critDamage'), maxLevel: 5,
+   207→          baseLabel: '200%', finalLabel: `${(200 + u('critDamage') * 15)}%`, desc: t('upgrades.statdesc.critDamage') },
+   208→      ],
+   209→    },
+   210→    {
+   211→      id: 'defense',
+   212→      icon: '🛡️',
+   213→      name: t('upgrades.cat.defense'),
+   214→      color: '#00ff41',
+   215→      stats: [
+   216→        { key: 'maxHp', icon: '🛡️', name: t('upgrades.stat.maxHp'), level: u('maxHp'), maxLevel: 5,
+   217→          baseLabel: '100 HP', finalLabel: `${100 + u('maxHp') * 5} HP`, desc: t('upgrades.statdesc.maxHp') },
+   218→        { key: 'regenSpeed', icon: '💖', name: t('upgrades.stat.regen'), level: u('regenSpeed'), maxLevel: 5,
+   219→          baseLabel: `3 ${v('hpPerSec')}`, finalLabel: `${(3 * (1 + u('regenSpeed') * 0.05)).toFixed(1)} ${v('hpPerSec')}`, desc: t('upgrades.statdesc.regen') },
+   220→        { key: 'defense', icon: '🦾', name: t('upgrades.stat.armor'), level: u('defense'), maxLevel: 5,
+   221→          baseLabel: '0%', finalLabel: `−${u('defense') * 3}% ${v('damageReduction')}`, desc: t('upgrades.statdesc.armor') },
+   222→        { key: 'shockwave', icon: '💥', name: t('upgrades.stat.shockwave'), level: u('shockwave'), maxLevel: 1,
+   223→          baseLabel: v('none'), finalLabel: u('shockwave') > 0 ? v('knockback') : v('none'), desc: t('upgrades.statdesc.shockwave') },
+   224→      ],
+   225→    },
+   226→    {
+   227→      id: 'economy',
+   228→      icon: '💎',
+   229→      name: t('upgrades.cat.economy'),
+   230→      color: '#00ffff',
+   231→      stats: [
+   232→        { key: 'coreBonus', icon: '💎', name: t('upgrades.stat.coreGather'), level: u('coreBonus'), maxLevel: 5,
+   233→          baseLabel: '100%', finalLabel: `+${u('coreBonus') * 5}%`, desc: t('upgrades.statdesc.coreGather') },
+   234→        { key: 'doubleCores', icon: '✨', name: t('upgrades.stat.doubleCores'), level: u('doubleCores'), maxLevel: 5,
+   235→          baseLabel: '0%', finalLabel: `${u('doubleCores') * 6}% ${v('chanceX2')}`, desc: t('upgrades.statdesc.doubleCores') },
+   236→      ],
+   237→    },
+   238→  ];
+   239→}
+   240→
+   241→/** A single rich stat row with level pips and base → final breakdown. */
+   242→function StatRow({ stat, color }: { stat: StatDef; color: string }) {
+   243→  const pct = (stat.level / stat.maxLevel) * 100;
+   244→  return (
+   245→    <div
+   246→      className="relative overflow-hidden rounded-xl border bg-black/30 p-4 transition-all duration-300 hover:-translate-y-0.5 group"
+   247→      style={{ borderColor: stat.level > 0 ? `${color}44` : 'rgba(255,255,255,0.06)' }}
+   248→    >
+   249→      {/* hover glow */}
+   250→      <div
+   251→        className="absolute -inset-10 opacity-0 group-hover:opacity-[0.08] transition-opacity duration-500 blur-2xl pointer-events-none"
+   252→        style={{ backgroundColor: color }}
+   253→      />
+   254→      <div className="relative z-10 flex items-center gap-4">
+   255→        {/* Icon badge */}
+   256→        <div
+   257→          className="shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl border"
+   258→          style={{
+   259→            background: stat.level > 0 ? `${color}1a` : 'rgba(255,255,255,0.03)',
+   260→            borderColor: stat.level > 0 ? `${color}55` : 'rgba(255,255,255,0.08)',
+   261→            textShadow: stat.level > 0 ? `0 0 12px ${color}` : 'none',
+   262→            filter: stat.level > 0 ? 'none' : 'grayscale(0.6) opacity(0.5)',
+   263→          }}
+   264→        >
+   265→          {stat.icon}
+   266→        </div>
+   267→
+   268→        {/* Title + value */}
+   269→        <div className="flex-1 min-w-0">
+   270→          <div className="flex items-center justify-between gap-2 mb-0.5">
+   271→            <span className="font-rajdhani text-white/60 text-xs tracking-[0.2em] uppercase truncate">{stat.name}</span>
+   272→            <span
+   273→              className="font-orbitron text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
+   274→              style={{
+   275→                color: stat.level > 0 ? color : 'rgba(255,255,255,0.3)',
+   276→                background: stat.level > 0 ? `${color}15` : 'rgba(255,255,255,0.04)',
+   277→                border: `1px solid ${stat.level > 0 ? color + '44' : 'rgba(255,255,255,0.08)'}`,
+   278→              }}
+   279→            >
+   280→              {stat.level}/{stat.maxLevel}
+   281→            </span>
+   282→          </div>
+   283→          <div className="flex items-baseline gap-2 flex-wrap">
+   284→            <span
+   285→              className="font-orbitron text-xl font-black"
+   286→              style={{ color: stat.level > 0 ? color : 'rgba(255,255,255,0.5)', textShadow: stat.level > 0 ? `0 0 10px ${color}66` : 'none' }}
+   287→            >
+   288→              {stat.finalLabel}
+   289→            </span>
+   290→            {stat.level > 0 && (
+   291→              <span className="font-rajdhani text-[11px] text-white/35">
+   292→                <span className="line-through opacity-60">{stat.baseLabel}</span> → {stat.finalLabel}
+   293→              </span>
+   294→            )}
+   295→          </div>
+   296→        </div>
+   297→      </div>
+   298→
+   299→      {/* Level pips */}
+   300→      <div className="relative z-10 flex gap-1 mt-3">
+   301→        {Array.from({ length: stat.maxLevel }).map((_, i) => (
+   302→          <div
+   303→            key={i}
+   304→            className="flex-1 h-1 rounded-full transition-all duration-500"
+   305→            style={{
+   306→              background: i < stat.level ? color : 'rgba(255,255,255,0.06)',
+   307→              boxShadow: i < stat.level ? `0 0 6px ${color}88` : 'none',
+   308→            }}
+   309→          />
+   310→        ))}
+   311→      </div>
+   312→
+   313→      {/* Progress bar + description */}
+   314→      <div className="relative z-10 font-rajdhani text-[10px] text-white/35 flex justify-between mt-2">
+   315→        <span>{stat.desc}</span>
+   316→        <span style={{ color: stat.level > 0 ? color + 'aa' : 'rgba(255,255,255,0.25)' }}>{Math.round(pct)}%</span>
+   317→      </div>
+   318→    </div>
+   319→  );
+   320→}
+   321→
+   322→/** A category block with header + its stat rows. */
+   323→function StatCategoryBlock({ category }: { category: StatCategoryDef }) {
+   324→  const { t } = useLanguage();
+   325→  const acquired = category.stats.filter(s => s.level > 0).length;
+   326→  const totalLevels = category.stats.reduce((sum, s) => sum + s.level, 0);
+   327→  const maxLevels = category.stats.reduce((sum, s) => sum + s.maxLevel, 0);
+   328→  const pct = maxLevels > 0 ? (totalLevels / maxLevels) * 100 : 0;
+   329→
+   330→  return (
+   331→    <div className="mb-8">
+   332→      {/* Category header */}
+   333→      <div className="flex items-center gap-3 mb-4">
+   334→        <div
+   335→          className="w-10 h-10 rounded-lg flex items-center justify-center text-xl border shrink-0"
+   336→          style={{
+   337→            background: `${category.color}15`,
+   338→            borderColor: `${category.color}44`,
+   339→            textShadow: `0 0 12px ${category.color}`,
+   340→          }}
+   341→        >
+   342→          {category.icon}
+   343→        </div>
+   344→        <div className="flex-1">
+   345→          <div className="font-orbitron font-black text-lg tracking-wider" style={{ color: category.color, textShadow: `0 0 8px ${category.color}66` }}>
+   346→            {category.name}
+   347→          </div>
+   348→          <div className="font-rajdhani text-[11px] text-white/40 tracking-widest">
+   349→            {t('upgrades.cat.acquired', { acquired, total: category.stats.length, levels: totalLevels, max: maxLevels })}
+   350→          </div>
+   351→        </div>
+   352→        {/* Mini ring progress */}
+   353→        <div className="relative w-12 h-12 shrink-0">
+   354→          <svg className="w-12 h-12 -rotate-90" viewBox="0 0 48 48">
+   355→            <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
+   356→            <circle
+   357→              cx="24" cy="24" r="20" fill="none" stroke={category.color} strokeWidth="3" strokeLinecap="round"
+   358→              strokeDasharray={`${(pct / 100) * 125.66} 125.66`}
+   359→              style={{ filter: `drop-shadow(0 0 4px ${category.color})`, transition: 'stroke-dasharray 0.8s ease' }}
+   360→            />
+   361→          </svg>
+   362→          <div className="absolute inset-0 flex items-center justify-center font-orbitron text-[10px] font-bold" style={{ color: category.color }}>
+   363→            {Math.round(pct)}%
+   364→          </div>
+   365→        </div>
+   366→      </div>
+   367→
+   368→      {/* Stat rows */}
+   369→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+   370→        {category.stats.map(stat => (
+   371→          <StatRow key={stat.key} stat={stat} color={category.color} />
+   372→        ))}
+   373→      </div>
+   374→    </div>
+   375→  );
+   376→}
+   377→
+   378→/** Full stats tab: hero summary + categorized stats. */
+   379→function StatsTab({ progress }: { progress: GameProgress }) {
+   380→  const { t } = useLanguage();
+   381→  const categories = buildStatCategories(progress.upgrades, t);
+   382→  const allStats = categories.flatMap(c => c.stats);
+   383→  const totalLevels = allStats.reduce((s, st) => s + st.level, 0);
+   384→  const maxLevels = allStats.reduce((s, st) => s + st.maxLevel, 0);
+   385→  const overallPct = maxLevels > 0 ? (totalLevels / maxLevels) * 100 : 0;
+   386→
+   387→  // Combat Power — weighted aggregate for a satisfying single number
+   388→  const u = (k: keyof GameProgress['upgrades']) => progress.upgrades[k] || 0;
+   389→  const combatPower = Math.round(
+   390→    (100 + u('maxHp') * 5) * (1 + u('damage') * 0.15) * (1 + u('critChance') * 0.03) * (1 + u('critDamage') * 0.075)
+   391→    * (1 + u('maxArrows') * 0.08) * (1 + u('projectileSpeed') * 0.05) * (1 + u('piercing') * 0.15)
+   392→    * (1 + u('defense') * 0.03) * (1 + u('reloadSpeed') * 0.05) * (1 + u('regenSpeed') * 0.04)
+   393→  );
+   394→
+   395→  const baseUnlocked = u('baseNode') > 0;
+   396→
+   397→  return (
+   398→    <div className="w-full max-w-4xl mx-auto mt-4 mb-16 animate-fade-in">
+   399→      {/* Hero summary panel */}
+   400→      <div className="glass-panel rounded-2xl p-6 mb-8 relative overflow-hidden border border-white/10">
+   401→        <div className="absolute -top-20 -right-20 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+   402→        <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+   403→
+   404→        <div className="relative z-10 flex flex-col md:flex-row items-center gap-6">
+   405→          {/* Overall progress ring */}
+   406→          <div className="relative w-28 h-28 shrink-0">
+   407→            <svg className="w-28 h-28 -rotate-90" viewBox="0 0 112 112">
+   408→              <circle cx="56" cy="56" r="48" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="6" />
+   409→              <circle
+   410→                cx="56" cy="56" r="48" fill="none" stroke="url(#hero-grad)" strokeWidth="6" strokeLinecap="round"
+   411→                strokeDasharray={`${(overallPct / 100) * 301.59} 301.59`}
+   412→                style={{ filter: 'drop-shadow(0 0 8px rgba(0,255,255,0.6))', transition: 'stroke-dasharray 1s ease' }}
+   413→              />
+   414→              <defs>
+   415→                <linearGradient id="hero-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+   416→                  <stop offset="0%" stopColor="#00ffff" />
+   417→                  <stop offset="50%" stopColor="#bf00ff" />
+   418→                  <stop offset="100%" stopColor="#ff006e" />
+   419→                </linearGradient>
+   420→              </defs>
+   421→            </svg>
+   422→            <div className="absolute inset-0 flex flex-col items-center justify-center">
+   423→              <span className="font-orbitron text-2xl font-black neon-cyan">{Math.round(overallPct)}%</span>
+   424→              <span className="font-rajdhani text-[9px] text-white/40 tracking-widest uppercase">{t('upgrades.summary.upgradeProgress')}</span>
+   425→            </div>
+   426→          </div>
+   427→
+   428→          {/* Summary stats */}
+   429→          <div className="flex-1 w-full">
+   430→            <div className="font-orbitron font-black text-xl text-white mb-1 tracking-wider">
+   431→              {baseUnlocked ? t('upgrades.summary.combatProfile') : t('upgrades.summary.baseConfig')}
+   432→            </div>
+   433→            <div className="font-rajdhani text-white/40 text-sm mb-4 tracking-widest">
+   434→              {t('upgrades.summary.levelsTotal', { total: totalLevels, max: maxLevels })}
+   435→            </div>
+   436→            <div className="grid grid-cols-3 gap-3">
+   437→              <SummaryStat label={t('upgrades.summary.combatPower')} value={combatPower.toLocaleString()} color="#ff006e" />
+   438→              <SummaryStat label={t('upgrades.summary.cores')} value={progress.cores.toLocaleString()} color="#bf00ff" icon />
+   439→              <SummaryStat label={t('upgrades.summary.upgrades')} value={`${totalLevels}/${maxLevels}`} color="#00ffff" />
+   440→            </div>
+   441→          </div>
+   442→        </div>
+   443→      </div>
+   444→
+   445→      {/* Category sections */}
+   446→      {categories.map(cat => (
+   447→        <StatCategoryBlock key={cat.id} category={cat} />
+   448→      ))}
+   449→    </div>
+   450→  );
+   451→}
+   452→
+   453→function SummaryStat({ label, value, color, icon }: { label: string, value: string, color: string, icon?: boolean }) {
+   454→  return (
+   455→    <div
+   456→      className="rounded-xl border p-3 flex flex-col items-center justify-center text-center bg-black/30"
+   457→      style={{ borderColor: `${color}33` }}
+   458→    >
+   459→      <div className="font-rajdhani text-[9px] text-white/40 tracking-widest uppercase mb-1">{label}</div>
+   460→      <div className="font-orbitron text-lg font-black flex items-center gap-1.5" style={{ color, textShadow: `0 0 8px ${color}66` }}>
+   461→        {icon && <SpaceCoreIcon className="w-4 h-4" />}
+   462→        {value}
+   463→      </div>
+   464→    </div>
+   465→  );
+   466→}
+   467→
+   468→/**
+   469→ * Pan + wheel-zoom canvas for the upgrade tree.
+   470→ * Defined at module scope (NOT inside UpgradesScreen) so it keeps a stable
+   471→ * component identity across re-renders — otherwise its refs/transform would
+   472→ * reset every time the parent updates state.
+   473→ */
+   474→function UpgradeTreeCanvas({
+   475→  children,
+   476→  onZoomChange,
+   477→}: {
+   478→  children: React.ReactNode;
+   479→  onZoomChange: (zoom: number) => void;
+   480→}) {
+   481→  const { t } = useLanguage();
+   482→  const containerRef = useRef<HTMLDivElement>(null);
+   483→  const contentRef = useRef<HTMLDivElement>(null);
+   484→  const transformRef = useRef({ zoom: 1, panX: 0, panY: 0 });
+   485→  // displayZoom mirrors the ref into state so we can read it during render
+   486→  // for the zoom indicator (refs must not be read during render).
+   487→  const [displayZoom, setDisplayZoom] = useState(1);
+   488→  const [isDragging, setIsDragging] = useState(false);
+   489→  const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0, moved: false });
+   490→
+   491→  const applyTransform = useCallback(() => {
+   492→    const el = contentRef.current;
+   493→    if (el) {
+   494→      const { zoom, panX, panY } = transformRef.current;
+   495→      el.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+   496→    }
+   497→    onZoomChange(transformRef.current.zoom);
+   498→    setDisplayZoom(transformRef.current.zoom);
+   499→  }, [onZoomChange]);
+   500→
+   501→  // Center the content on first mount
+   502→  useEffect(() => {
+   503→    const el = containerRef.current;
+   504→    if (!el) return;
+   505→    const cw = el.clientWidth;
+   506→    const ch = el.clientHeight;
+   507→    transformRef.current = {
+   508→      zoom: 1,
+   509→      panX: cw / 2 - CENTER,
+   510→      panY: ch / 2 - CENTER,
+   511→    };
+   512→    applyTransform();
+   513→    const handleResize = () => {
+   514→      const z = transformRef.current.zoom;
+   515→      transformRef.current.panX = el.clientWidth / 2 - CENTER * z;
+   516→      transformRef.current.panY = el.clientHeight / 2 - CENTER * z;
+   517→      applyTransform();
+   518→    };
+   519→    window.addEventListener('resize', handleResize);
+   520→    return () => window.removeEventListener('resize', handleResize);
+   521→  }, [applyTransform]);
+   522→
+   523→  // Non-passive wheel listener so we can preventDefault page scroll
+   524→  useEffect(() => {
+   525→    const el = containerRef.current;
+   526→    if (!el) return;
+   527→    const onWheel = (e: WheelEvent) => {
+   528→      e.preventDefault();
+   529→      const rect = el.getBoundingClientRect();
+   530→      const cx = e.clientX - rect.left;
+   531→      const cy = e.clientY - rect.top;
+   532→      const { zoom: prevZoom, panX: prevPanX, panY: prevPanY } = transformRef.current;
+   533→      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+   534→      const newZoom = clampZoom(prevZoom * factor);
+   535→      const actualFactor = newZoom / prevZoom;
+   536→      transformRef.current.zoom = newZoom;
+   537→      transformRef.current.panX = cx - (cx - prevPanX) * actualFactor;
+   538→      transformRef.current.panY = cy - (cy - prevPanY) * actualFactor;
+   539→      applyTransform();
+   540→    };
+   541→    el.addEventListener('wheel', onWheel, { passive: false });
+   542→    return () => el.removeEventListener('wheel', onWheel);
+   543→  }, [applyTransform]);
+   544→
+   545→  const onMouseDown = (e: React.MouseEvent) => {
+   546→    if (e.button !== 0) return;
+   547→    dragStart.current = {
+   548→      x: e.clientX,
+   549→      y: e.clientY,
+   550→      panX: transformRef.current.panX,
+   551→      panY: transformRef.current.panY,
+   552→      moved: false,
+   553→    };
+   554→    setIsDragging(true);
+   555→  };
+   556→
+   557→  const onMouseMove = (e: React.MouseEvent) => {
+   558→    if (!isDragging) return;
+   559→    const dx = e.clientX - dragStart.current.x;
+   560→    const dy = e.clientY - dragStart.current.y;
+   561→    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragStart.current.moved = true;
+   562→    transformRef.current.panX = dragStart.current.panX + dx;
+   563→    transformRef.current.panY = dragStart.current.panY + dy;
+   564→    applyTransform();
+   565→  };
+   566→
+   567→  const zoomBy = useCallback((factor: number) => {
+   568→    const el = containerRef.current;
+   569→    if (!el) return;
+   570→    const cx = el.clientWidth / 2;
+   571→    const cy = el.clientHeight / 2;
+   572→    const { zoom: prevZoom, panX: prevPanX, panY: prevPanY } = transformRef.current;
+   573→    const newZoom = clampZoom(prevZoom * factor);
+   574→    const actualFactor = newZoom / prevZoom;
+   575→    transformRef.current.zoom = newZoom;
+   576→    transformRef.current.panX = cx - (cx - prevPanX) * actualFactor;
+   577→    transformRef.current.panY = cy - (cy - prevPanY) * actualFactor;
+   578→    applyTransform();
+   579→  }, [applyTransform]);
+   580→
+   581→  const resetView = useCallback(() => {
+   582→    const el = containerRef.current;
+   583→    if (!el) return;
+   584→    transformRef.current = {
+   585→      zoom: 1,
+   586→      panX: el.clientWidth / 2 - CENTER,
+   587→      panY: el.clientHeight / 2 - CENTER,
+   588→    };
+   589→    applyTransform();
+   590→  }, [applyTransform]);
+   591→
+   592→  const currentZoom = displayZoom;
+   593→
+   594→  return (
+   595→    <div
+   596→      className="w-full h-[65vh] min-h-[500px] overflow-hidden rounded-3xl border border-white/15 shadow-2xl relative bg-black/40 touch-none select-none"
+   597→      ref={containerRef}
+   598→      onMouseDown={onMouseDown}
+   599→      onMouseUp={() => setIsDragging(false)}
+   600→      onMouseLeave={() => setIsDragging(false)}
+   601→      onMouseMove={onMouseMove}
+   602→      style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+   603→    >
+   604→      <div
+   605→        ref={contentRef}
+   606→        className="absolute top-0 left-0"
+   607→        style={{
+   608→          width: CONTENT_SIZE,
+   609→          height: CONTENT_SIZE,
+   610→          transformOrigin: '0 0',
+   611→          willChange: 'transform',
+   612→        }}
+   613→      >
+   614→        <div className="absolute inset-0 grid-bg opacity-30 pointer-events-none" />
+   615→        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,255,255,0.06),transparent_60%)] pointer-events-none" />
+   616→        {children}
+   617→      </div>
+   618→
+   619→      {/* Zoom controls overlay */}
+   620→      <div className="absolute bottom-3 right-3 flex flex-col gap-1.5 z-40">
+   621→        <button
+   622→          onClick={() => { audio.playClick(); zoomBy(1.2); }}
+   623→          className="w-9 h-9 rounded-lg glass-panel border border-cyan-500/30 text-cyan-300 font-orbitron font-bold text-lg flex items-center justify-center hover:border-cyan-400/60 hover:bg-cyan-500/10 transition-all shadow-[0_0_10px_rgba(0,255,255,0.15)]"
+   624→          title={t('upgrades.zoomIn')}
+   625→        >
+   626→          +
+   627→        </button>
+   628→        <button
+   629→          onClick={() => { audio.playClick(); zoomBy(1 / 1.2); }}
+   630→          className="w-9 h-9 rounded-lg glass-panel border border-cyan-500/30 text-cyan-300 font-orbitron font-bold text-lg flex items-center justify-center hover:border-cyan-400/60 hover:bg-cyan-500/10 transition-all shadow-[0_0_10px_rgba(0,255,255,0.15)]"
+   631→          title={t('upgrades.zoomOut')}
+   632→        >
+   633→          −
+   634→        </button>
+   635→        <button
+   636→          onClick={() => { audio.playClick(); resetView(); }}
+   637→          className="w-9 h-9 rounded-lg glass-panel border border-cyan-500/30 text-cyan-300 font-orbitron font-bold text-[10px] flex items-center justify-center hover:border-cyan-400/60 hover:bg-cyan-500/10 transition-all shadow-[0_0_10px_rgba(0,255,255,0.15)]"
+   638→          title={t('upgrades.zoomReset')}
+   639→        >
+   640→          1:1
+   641→        </button>
+   642→      </div>
+   643→
+   644→      {/* Zoom level indicator */}
+   645→      <div className="absolute bottom-3 left-3 z-40 glass-panel px-3 py-1.5 rounded-lg border border-white/10 font-orbitron text-xs text-cyan-300/80 tracking-widest shadow-[0_0_10px_rgba(0,0,0,0.4)]">
+   646→        {Math.round(currentZoom * 100)}%
+   647→      </div>
+   648→    </div>
+   649→  );
+   650→}
+   651→
+   652→export function UpgradesScreen({ progress, onUpgrade, onBack }: UpgradesScreenProps) {
+   653→  const { t } = useLanguage();
+   654→  const [activeTab, setActiveTab] = useState<'tree' | 'stats'>('tree');
+   655→  // Live tree zoom — lifted to this level so node tooltips can counter-scale
+   656→  // and stay readable at any zoom level. Pan stays inside UpgradeTreeCanvas
+   657→  // (ref) for smooth, re-render-free dragging.
+   658→  const [treeZoom, setTreeZoom] = useState(1);
+   659→  const reportZoom = useCallback((z: number) => setTreeZoom(z), []);
+   660→
+   661→  const renderNode = (item: UpgradeItem, color: string, x: number, y: number, zoom: number) => {
+   662→    const level = progress.upgrades[item.key] || 0;
+   663→    const isMax = level >= item.maxLevel;
+   664→    // Guard against missing cost entry (e.g. old save with higher level than costs array)
+   665→    const cost = isMax ? 0 : (item.costs[level] ?? 0);
+   666→    const canAfford = progress.cores >= cost;
+   667→
+   668→    const reqLevel = item.requires ? (progress.upgrades[item.requires] || 0) : 1;
+   669→    const reqItemDef = item.requires ? ALL_UPGRADE_ITEMS.find(i => i.key === item.requires) : null;
+   670→    const reqMaxLevel = reqItemDef ? reqItemDef.maxLevel : 1;
+   671→
+   672→    // Lock logic:
+   673→    // - requiresAll → ALL listed keys must be at MAX
+   674→    // - requiresMax → single requirement must be at MAX
+   675→    // - otherwise → requirement level ≥ 1
+   676→    const isLocked = item.requiresAll
+   677→      ? item.requiresAll.some(k => {
+   678→          const def = ALL_UPGRADE_ITEMS.find(i => i.key === k);
+   679→          const max = def ? def.maxLevel : 1;
+   680→          return (progress.upgrades[k] || 0) < max;
+   681→        })
+   682→      : item.requires
+   683→        ? (item.requiresMax ? reqLevel < reqMaxLevel : reqLevel < 1)
+   684→        : false;
+   685→
+   686→    const tooltipPositionClass = "top-full left-1/2 -translate-x-1/2 mt-4";
+   687→
+   688→    // Build requirement description for the tooltip
+   689→    let reqName = '';
+   690→    if (item.requiresAll && item.requiresAll.length > 0) {
+   691→      reqName = item.requiresAll
+   692→        .map(k => t('upgrades.name.' + k))
+   693→        .join(', ');
+   694→    } else if (item.requires) {
+   695→      reqName = t('upgrades.name.' + item.requires);
+   696→    }
+   697→
+   698→    const isBaseNode = item.key === 'baseNode';
+   699→    const ringSizeClass = isBaseNode ? "w-36 h-36" : "w-24 h-24";
+   700→    const buttonSizeClass = isBaseNode ? "w-20 h-20" : "w-16 h-16";
+   701→    // Counter-scale the tooltip so it stays readable at any zoom level
+   702→    const tooltipScale = 1 / zoom;
+   703→
+   704→    return (
+   705→      <div
+   706→        key={item.key}
+   707→        className="absolute z-10"
+   708→        style={{ left: x, top: y, transform: 'translate(-50%, -50%)' }}
+   709→      >
+   710→        <div className={`relative group ${ringSizeClass} flex items-center justify-center`}>
+   711→          {/* Outermost soft aura halo */}
+   712→          {!isLocked && (
+   713→            <div
+   714→              className="absolute rounded-full pointer-events-none"
+   715→              style={{
+   716→                inset: '-30%',
+   717→                background: `radial-gradient(circle, ${color}33 0%, transparent 65%)`,
+   718→                filter: 'blur(8px)',
+   719→                animation: 'tree-socket-breathe 3s ease-in-out infinite',
+   720→              }}
+   721→            />
+   722→          )}
+   723→
+   724→          {/* Outer rotating energy ring (only when unlocked / affordable) */}
+   725→          {!isLocked && (
+   726→            <div
+   727→              className={`absolute inset-0 rounded-full transition-opacity duration-500 opacity-80 group-hover:opacity-100 ${isMax ? 'animate-spin-slow-reverse' : 'animate-spin-slow'}`}
+   728→              style={{ filter: `drop-shadow(0 0 10px ${color}aa)` }}
+   729→            >
+   730→              <div
+   731→                className="absolute inset-0 rounded-full"
+   732→                style={{
+   733→                  padding: '5px',
+   734→                  backgroundImage: isBaseNode
+   735→                    ? `conic-gradient(from 0deg, #00ffff, #ff006e, #ffaa00, #00ff41, #00ffff)`
+   736→                    : `conic-gradient(from 0deg, ${color}, #ffffff, ${color}, ${color}88, ${color})`,
+   737→                  WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+   738→                  WebkitMaskComposite: 'xor',
+   739→                  maskImage: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+   740→                  maskComposite: 'exclude',
+   741→                }}
+   742→              />
+   743→            </div>
+   744→          )}
+   745→
+   746→          {/* Inner counter-rotating dashed ring */}
+   747→          {!isLocked && (
+   748→            <div
+   749→              className="absolute rounded-full pointer-events-none animate-spin-slow-reverse"
+   750→              style={{
+   751→                inset: isBaseNode ? '14%' : '10%',
+   752→                border: `1px dashed ${color}66`,
+   753→                animationDuration: '14s',
+   754→              }}
+   755→            />
+   756→          )}
+   757→
+   758→          {/* Locked dim ring */}
+   759→          {isLocked && (
+   760→            <div
+   761→              className="absolute inset-0 rounded-full"
+   762→              style={{
+   763→                border: '2px dashed rgba(255,255,255,0.12)',
+   764→                background: 'rgba(0,0,0,0.35)',
+   765→              }}
+   766→            />
+   767→          )}
+   768→
+   769→          {/* Core button */}
+   770→          <button
+   771→            className={`relative ${buttonSizeClass} rounded-full border-2 flex flex-col items-center justify-center transition-all duration-300 z-10 ${isLocked ? 'cursor-not-allowed' : (canAfford && !isMax ? 'cursor-pointer hover:scale-110 node-can-afford' : 'cursor-default')}`}
+   772→            style={{
+   773→              borderColor: isLocked ? 'rgba(255,255,255,0.1)' : color,
+   774→              backgroundColor: isLocked ? 'rgba(0,0,0,0.6)' : (isMax ? `${color}55` : `${color}1a`),
+   775→              color: color,
+   776→              boxShadow: isLocked ? 'none' : `0 0 ${isMax ? '24px' : '12px'} ${color}77, inset 0 0 14px ${color}22`,
+   777→            }}
+   778→            onClick={() => {
+   779→              if (!isLocked && !isMax && canAfford) {
+   780→                audio.playClick();
+   781→                onUpgrade(item.key, cost);
+   782→              }
+   783→            }}
+   784→          >
+   785→            {isLocked && (
+   786→              <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-full z-20">
+   787→                <span className="text-2xl drop-shadow-md">🔒</span>
+   788→              </div>
+   789→            )}
+   790→
+   791→            {isMax && (
+   792→              <div className="absolute -top-2 -right-2 bg-black border border-white/20 text-[8px] font-orbitron font-bold px-1.5 py-0.5 rounded text-white z-20" style={{ borderColor: color, color, boxShadow: `0 0 6px ${color}` }}>
+   793→                MAX
+   794→              </div>
+   795→            )}
+   796→
+   797→            <span className={`${isBaseNode ? 'text-4xl' : 'text-2xl'} ${isLocked ? 'grayscale opacity-30' : 'drop-shadow-[0_0_8px_currentColor)]'}`} style={{ textShadow: isLocked ? 'none' : `0 0 10px ${color}` }}>{item.icon}</span>
+   798→            <span className={`font-orbitron font-bold mt-1 tracking-widest ${isBaseNode ? 'text-xs' : 'text-[9px]'}`} style={{ color: isLocked ? 'rgba(255,255,255,0.3)' : '#fff' }}>
+   799→              {level}/{item.maxLevel}
+   800→            </span>
+   801→          </button>
+   802→
+   803→          {/* Tooltip — counter-scaled to stay readable at any zoom */}
+   804→          <div
+   805→            className={`absolute ${tooltipPositionClass} w-60 p-5 rounded-xl glass-panel opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 z-50 text-left border border-white/10 backdrop-blur-xl shadow-2xl`}
+   806→            style={{
+   807→              boxShadow: `0 15px 35px -5px ${color}88, inset 0 0 20px ${color}11`,
+   808→              transform: `translateX(-50%) scale(${tooltipScale})`,
+   809→              transformOrigin: 'top center',
+   810→            }}
+   811→          >
+   812→            <div className="absolute top-0 left-0 w-full h-1" style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
+   813→            <div className="font-orbitron font-bold text-base mb-1" style={{ color, textShadow: `0 0 10px ${color}88` }}>{t('upgrades.name.' + item.key)}</div>
+   814→            <div className="font-rajdhani text-sm text-white/80 mb-4 leading-relaxed">{t('upgrades.desc.' + item.key)}</div>
+   815→
+   816→            <div className="flex justify-between items-center font-orbitron text-xs mb-1">
+   817→              <span className="text-white/50">{t('upgrades.levelLabel')}</span>
+   818→              <span className="text-white">{level} / {item.maxLevel}</span>
+   819→            </div>
+   820→
+   821→            <div className="flex justify-between items-center font-orbitron text-xs">
+   822→              <span className="text-white/50">{t('upgrades.priceLabel')}</span>
+   823→              <span style={{ color: isMax ? '#00ff41' : (canAfford ? '#00ffff' : '#ff0000') }}>
+   824→                {isMax ? t('common.maxLabel') : cost}
+   825→              </span>
+   826→            </div>
+   827→
+   828→            {isLocked && (
+   829→              <div className="mt-3 pt-2 border-t border-white/10 text-[10px] text-red-400 font-rajdhani text-center">
+   830→                {item.requiresAll
+   831→                  ? <>{t('upgrades.requiresMaxLabel')} {reqName}</>
+   832→                  : <>{t('upgrades.requiresLabel')} {reqName} {item.requiresMax ? `MAX (${reqMaxLevel}/${reqMaxLevel})` : 'LVL 1'}</>}
+   833→              </div>
+   834→            )}
+   835→            {!isLocked && !isMax && (
+   836→              <div className="mt-3 pt-2 border-t border-white/10 text-[10px] text-center font-rajdhani" style={{ color: canAfford ? '#00ff41' : '#ff0000' }}>
+   837→                {canAfford ? t('upgrades.clickToBuy') : t('upgrades.notEnoughCores')}
+   838→              </div>
+   839→            )}
+   840→          </div>
+   841→        </div>
+   842→      </div>
+   843→    );
+   844→  };
+   845→
+   846→  const baseUnlocked = (progress.upgrades.baseNode || 0) > 0;
+   847→
+   848→  // ===== Build node positions & enhanced links =====
+   849→  const buildTree = () => {
+   850→    const CENTER_X = CENTER;
+   851→    const CENTER_Y = CENTER;
+   852→    const NODE_SPACING = 160;
+   853→
+   854→    const nodePositions: Record<string, { x: number, y: number, color: string, unlocked: boolean }> = {};
+   855→    nodePositions['baseNode'] = { x: CENTER_X, y: CENTER_Y, color: BASE_NODE.color, unlocked: baseUnlocked };
+   856→
+   857→    const branchAngles = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+   858→
+   859→    BRANCHES.forEach((branch, bIdx) => {
+   860→      const angle = branchAngles[bIdx];
+   861→      branch.items.forEach((item, iIdx) => {
+   862→        const dist = (iIdx + 1) * NODE_SPACING;
+   863→        const zigZagOffset = (iIdx % 2 === 0) ? 35 : -35;
+   864→        const x = CENTER_X + Math.cos(angle) * dist - Math.sin(angle) * zigZagOffset;
+   865→        const y = CENTER_Y + Math.sin(angle) * dist + Math.cos(angle) * zigZagOffset;
+   866→        const unlocked = (progress.upgrades[item.key] || 0) > 0;
+   867→        nodePositions[item.key] = { x, y, color: branch.color, unlocked };
+   868→      });
+   869→    });
+   870→
+   871→    // Position satellite nodes relative to their parent
+   872→    SATELLITE_NODES.forEach(sat => {
+   873→      const parent = nodePositions[sat.parentKey];
+   874→      if (parent) {
+   875→        const unlocked = (progress.upgrades[sat.item.key] || 0) > 0;
+   876→        nodePositions[sat.item.key] = {
+   877→          x: parent.x + sat.offsetX,
+   878→          y: parent.y + sat.offsetY,
+   879→          color: sat.color,
+   880→          unlocked,
+   881→        };
+   882→      }
+   883→    });
+   884→
+   885→    // Helper to build a single link element from `fromKey` to `item`'s node.
+   886→    // Used for both main-chain links and satellite links (which may have
+   887→    // multiple parents via linkFrom / requiresAll).
+   888→    const buildLink = (
+   889→      linkKey: string,
+   890→      fromKey: UpgradeKey,
+   891→      item: UpgradeItem,
+   892→      nodePositions: Record<string, { x: number, y: number, color: string, unlocked: boolean }>,
+   893→    ): React.ReactElement | null => {
+   894→      const from = nodePositions[fromKey];
+   895→      const to = nodePositions[item.key];
+   896→      if (!from || !to) return null;
+   897→      const isUnlocked = from.unlocked;
+   898→      const childUnlocked = to.unlocked;
+   899→
+   900→      const dx = to.x - from.x;
+   901→      const dy = to.y - from.y;
+   902→      const distance = Math.hypot(dx, dy);
+   903→      if (distance === 0) return null;
+   904→
+   905→      // Lines start/end exactly on the outer ring rim.
+   906→      const fromRadius = fromKey === 'baseNode' ? 72 : 48;
+   907→      const toRadius = item.key === 'baseNode' ? 72 : 48;
+   908→      const startX = from.x + (dx / distance) * fromRadius;
+   909→      const startY = from.y + (dy / distance) * fromRadius;
+   910→      const length = Math.max(0, distance - fromRadius - toRadius);
+   911→      const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+   912→
+   913→      return (
+   914→        <div
+   915→          key={linkKey}
+   916→          className="absolute"
+   917→          style={{
+   918→            left: startX,
+   919→            top: startY,
+   920→            width: length,
+   921→            height: 0,
+   922→            transform: `rotate(${angleDeg}deg)`,
+   923→            transformOrigin: '0 0',
+   924→            zIndex: 1,
+   925→          }}
+   926→        >
+   927→          {isUnlocked ? (
+   928→            <>
+   929→              {/* Layer 1 — wide soft outer glow */}
+   930→              <div
+   931→                className="absolute rounded-full"
+   932→                style={{
+   933→                  left: 0, top: '50%', width: '100%', height: 16,
+   934→                  transform: 'translateY(-50%)',
+   935→                  background: `linear-gradient(90deg, transparent 0%, ${from.color}55 15%, ${to.color}55 85%, transparent 100%)`,
+   936→                  filter: 'blur(7px)',
+   937→                  opacity: childUnlocked ? 0.9 : 0.55,
+   938→                }}
+   939→              />
+   940→              {/* Layer 2 — steady two-color base gradient */}
+   941→              <div
+   942→                className="absolute rounded-full"
+   943→                style={{
+   944→                  left: 0, top: '50%', width: '100%', height: 5,
+   945→                  transform: 'translateY(-50%)',
+   946→                  background: `linear-gradient(90deg, ${from.color}, ${to.color})`,
+   947→                  opacity: 0.75,
+   948→                  boxShadow: `0 0 8px ${from.color}88`,
+   949→                }}
+   950→              />
+   951→              {/* Layer 3 — flowing multi-pulse energy */}
+   952→              <div
+   953→                className="absolute rounded-full"
+   954→                style={{
+   955→                  left: 0, top: '50%', width: '100%', height: 3,
+   956→                  transform: 'translateY(-50%)',
+   957→                  background: `linear-gradient(90deg,
+   958→                    transparent 0%,
+   959→                    ${from.color} 8%,
+   960→                    #ffffff 14%,
+   961→                    ${to.color} 20%,
+   962→                    transparent 33%,
+   963→                    transparent 50%,
+   964→                    ${from.color} 58%,
+   965→                    #ffffff 64%,
+   966→                    ${to.color} 70%,
+   967→                    transparent 86%,
+   968→                    transparent 100%)`,
+   969→                  backgroundSize: '250% 100%',
+   970→                  animation: 'tree-link-flow 2.4s linear infinite',
+   971→                  opacity: 0.95,
+   972→                  mixBlendMode: 'screen',
+   973→                }}
+   974→              />
+   975→              {/* Layer 4 — bright white core thread */}
+   976→              <div
+   977→                className="absolute rounded-full"
+   978→                style={{
+   979→                  left: 0, top: '50%', width: '100%', height: 1.5,
+   980→                  transform: 'translateY(-50%)',
+   981→                  background: 'linear-gradient(90deg, rgba(255,255,255,0.3), rgba(255,255,255,0.95), rgba(255,255,255,0.3))',
+   982→                  boxShadow: '0 0 4px rgba(255,255,255,0.6)',
+   983→                }}
+   984→              />
+   985→              {/* Layer 5 — traveling energy orb */}
+   986→              <div
+   987→                className="absolute rounded-full pointer-events-none"
+   988→                style={{
+   989→                  top: '50%', width: 14, height: 14,
+   990→                  background: `radial-gradient(circle, #ffffff 0%, ${to.color} 40%, transparent 70%)`,
+   991→                  filter: 'blur(0.5px)',
+   992→                  animation: `tree-link-pulse-travel ${2.4 + (item.key.length % 3) * 0.4}s linear infinite`,
+   993→                  animationDelay: `${(item.key.charCodeAt(0) % 10) * 0.2}s`,
+   994→                  boxShadow: `0 0 12px ${to.color}`,
+   995→                }}
+   996→              />
+   997→              {/* Start socket */}
+   998→              <div
+   999→                className="absolute rounded-full"
+  1000→                style={{
+  1001→                  left: 0, top: '50%', width: 12, height: 12,
+  1002→                  transform: 'translate(-50%, -50%)',
+  1003→                  background: `radial-gradient(circle, #ffffff 0%, ${from.color} 60%)`,
+  1004→                  boxShadow: `0 0 10px ${from.color}, 0 0 20px ${from.color}88`,
+  1005→                  animation: 'tree-socket-breathe 2.5s ease-in-out infinite',
+  1006→                }}
+  1007→              />
+  1008→              {/* End socket */}
+  1009→              <div
+  1010→                className="absolute rounded-full"
+  1011→                style={{
+  1012→                  left: '100%', top: '50%',
+  1013→                  width: childUnlocked ? 12 : 9, height: childUnlocked ? 12 : 9,
+  1014→                  transform: 'translate(-50%, -50%)',
+  1015→                  background: childUnlocked
+  1016→                    ? `radial-gradient(circle, #ffffff 0%, ${to.color} 60%)`
+  1017→                    : `radial-gradient(circle, ${to.color} 0%, ${to.color}88 60%, transparent 100%)`,
+  1018→                  boxShadow: childUnlocked
+  1019→                    ? `0 0 10px ${to.color}, 0 0 20px ${to.color}88`
+  1020→                    : `0 0 6px ${to.color}66`,
+  1021→                  border: childUnlocked ? 'none' : `1px solid ${to.color}aa`,
+  1022→                  animation: 'tree-socket-breathe 2.5s ease-in-out infinite',
+  1023→                }}
+  1024→              />
+  1025→            </>
+  1026→          ) : (
+  1027→            <>
+  1028→              {/* Locked link — dim dashed shimmer */}
+  1029→              <div
+  1030→                className="absolute rounded-full"
+  1031→                style={{
+  1032→                  left: 0, top: '50%', width: '100%', height: 6,
+  1033→                  transform: 'translateY(-50%)',
+  1034→                  background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0px, rgba(255,255,255,0.18) 8px, transparent 8px, transparent 18px)',
+  1035→                  backgroundSize: '32px 100%',
+  1036→                  animation: 'tree-link-locked-shimmer 2s linear infinite',
+  1037→                  opacity: 0.5,
+  1038→                  filter: 'blur(0.5px)',
+  1039→                }}
+  1040→              />
+  1041→              <div
+  1042→                className="absolute rounded-full"
+  1043→                style={{
+  1044→                  left: 0, top: '50%', width: 8, height: 8,
+  1045→                  transform: 'translate(-50%, -50%)',
+  1046→                  background: 'rgba(0,0,0,0.6)',
+  1047→                  border: '1px solid rgba(255,255,255,0.2)',
+  1048→                }}
+  1049→              />
+  1050→              <div
+  1051→                className="absolute rounded-full"
+  1052→                style={{
+  1053→                  left: '100%', top: '50%', width: 8, height: 8,
+  1054→                  transform: 'translate(-50%, -50%)',
+  1055→                  background: 'rgba(0,0,0,0.6)',
+  1056→                  border: '1px solid rgba(255,255,255,0.12)',
+  1057→                }}
+  1058→              />
+  1059→            </>
+  1060→          )}
+  1061→        </div>
+  1062→      );
+  1063→    };
+  1064→
+  1065→    // Build enhanced link elements for main chain + satellites
+  1066→    const links: React.ReactElement[] = [];
+  1067→    BRANCHES.forEach(branch => {
+  1068→      branch.items.forEach(item => {
+  1069→        const link = buildLink(`link-${item.key}`, item.requires!, item, nodePositions);
+  1070→        if (link) links.push(link);
+  1071→      });
+  1072→    });
+  1073→    SATELLITE_NODES.forEach(sat => {
+  1074→      // Determine which nodes draw links to this satellite.
+  1075→      // Defaults to [item.requires]; linkFrom overrides (e.g. multiple parents).
+  1076→      const sources = sat.linkFrom || (sat.item.requires ? [sat.item.requires] : []);
+  1077→      sources.forEach(srcKey => {
+  1078→        const link = buildLink(`link-sat-${sat.item.key}-${srcKey}`, srcKey, sat.item, nodePositions);
+  1079→        if (link) links.push(link);
+  1080→      });
+  1081→    });
+  1082→
+  1083→    return { nodePositions, links };
+  1084→  };
+  1085→
+  1086→  const { nodePositions, links } = buildTree();
+  1087→
+  1088→  return (
+  1089→    <div className="absolute inset-0 flex flex-col items-center pt-8 px-4 animate-fade-in overflow-auto bg-[#070a0f]">
+  1090→      {/* Dynamic Grid Background */}
+  1091→      <div className="absolute inset-0 grid-bg opacity-30 pointer-events-none" />
+  1092→      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(0,255,255,0.05),transparent_50%)] pointer-events-none" />
+  1093→
+  1094→      <div className="w-full max-w-5xl relative z-10">
+  1095→        <div className="flex justify-between items-center mb-10">
+  1096→          <div>
+  1097→            <div className="flex gap-6 mb-2">
+  1098→              <button
+  1099→                className={`font-orbitron text-xl md:text-2xl font-black tracking-wider transition-all pb-1 ${activeTab === 'tree' ? 'neon-cyan border-b-2 border-[#00ffff]' : 'text-white/40 hover:text-white/70'}`}
+  1100→                onClick={() => { audio.playClick(); setActiveTab('tree'); }}
+  1101→              >
+  1102→                {t('upgrades.treeTab')}
+  1103→              </button>
+  1104→              <button
+  1105→                className={`font-orbitron text-xl md:text-2xl font-black tracking-wider transition-all pb-1 ${activeTab === 'stats' ? 'neon-purple border-b-2 border-[#bf00ff]' : 'text-white/40 hover:text-white/70'}`}
+  1106→                onClick={() => { audio.playClick(); setActiveTab('stats'); }}
+  1107→              >
+  1108→                {t('upgrades.statsTab')}
+  1109→              </button>
+  1110→            </div>
+  1111→            <div className="font-rajdhani text-white/40 text-sm tracking-widest">
+  1112→              {activeTab === 'tree' ? t('upgrades.treeSubtitle') : t('upgrades.statsSubtitle')}
+  1113→            </div>
+  1114→          </div>
+  1115→          <div className="glass-panel px-6 py-3 rounded-xl flex flex-col items-end hidden sm:flex">
+  1116→            <div className="font-rajdhani text-white/40 text-xs tracking-widest">{t('upgrades.coresLabel')}</div>
+  1117→            <div className="font-orbitron text-2xl font-black neon-purple flex items-center gap-2">
+  1118→              <SpaceCoreIcon className="w-8 h-8" />
+  1119→              {progress.cores.toLocaleString()}
+  1120→            </div>
+  1121→          </div>
+  1122→        </div>
+  1123→
+  1124→        {activeTab === 'tree' ? (
+  1125→          <div className="flex flex-col items-center relative w-full mt-4 mb-2 animate-fade-in">
+  1126→            <div className="font-rajdhani text-white/30 text-xs tracking-widest mb-4 text-center uppercase">
+  1127→              {t('upgrades.treeHint')}
+  1128→            </div>
+  1129→            <UpgradeTreeCanvas onZoomChange={reportZoom}>
+  1130→              {links}
+  1131→              {ALL_UPGRADE_ITEMS.map(item => {
+  1132→                const pos = nodePositions[item.key];
+  1133→                if (!pos) return null;
+  1134→                return renderNode(item, pos.color, pos.x, pos.y, treeZoom);
+  1135→              })}
+  1136→            </UpgradeTreeCanvas>
+  1137→          </div>
+  1138→        ) : (
+  1139→          <StatsTab progress={progress} />
+  1140→        )}
+  1141→
+  1142→        <button className="neon-btn py-3 px-6 rounded text-sm font-bold w-full max-w-md mx-auto block mt-8"
+  1143→          onClick={() => { audio.playClick(); onBack(); }}>
+  1144→          {t('upgrades.backToMenu')}
+  1145→        </button>
+  1146→      </div>
+  1147→    </div>
+  1148→  );
+  1149→}
+  1150→

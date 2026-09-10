@@ -1,0 +1,892 @@
+     1→/**
+     2→ * @fileoverview Определения врагов и отрисовка фигур (drawShape).
+     3→ *
+     4→ * Содержит:
+     5→ * - Типы: EnemyType, Enemy, Projectile, Particle, DustParticle
+     6→ * - Массив ENEMY_TYPES: все 12 типов врагов (от scout до boss_omega)
+     7→ * - createEnemy(): фабрика создания врага с случайной позицией спавна
+     8→ * - drawShape(): универсальная функция отрисовки врага по форме (circle, hexagon, blackhole, и т.д.)
+     9→ *
+    10→ * Чтобы добавить нового врага:
+    11→ * 1. Добавить объект в ENEMY_TYPES
+    12→ * 2. При уникальной форме — добавить case в drawShape
+    13→ * 3. Добавить паттерн движения в tickEnemies() (gameLogic.ts)
+    14→ *
+    15→ * @see gameLogic.ts — где враги обновляются
+    16→ * @see gameRenderer.ts — где враги рендерятся (renderEnemies вызывает drawShape)
+    17→ */
+    18→
+    19→import { getAuraSprite, getSheenSprite } from './lightEngine';
+    20→
+    21→// Паттерн пунктира внутренних линий — модульная константа:
+    22→// раньше массив [5, 10] аллоцировался заново на каждого врага в каждом кадре
+    23→const DASH_ENEMY_INNER = [5, 10];
+    24→
+    25→// =====================================================================
+    26→// ЗАПЕЧЁННЫЕ СПРАЙТЫ ФОРМ (кэш по форма+цвет+радиус)
+    27→// Ядро врага раньше рисовалось createRadialGradient + обводки каждый
+    28→// кадр — теперь один drawImage запечённого спрайта.
+    29→// =====================================================================
+    30→
+    31→const shapeSpriteCache = new Map<string, HTMLCanvasElement>();
+    32→
+    33→/** Обводка полигональной формы врага (общая для рендера и запекания). */
+    34→function tracePath(ctx: CanvasRenderingContext2D, shape: string, r: number) {
+    35→  switch (shape) {
+    36→    case 'circle':
+    37→      ctx.arc(0, 0, r, 0, Math.PI * 2);
+    38→      break;
+    39→    case 'triangle':
+    40→      for (let i = 0; i < 3; i++) {
+    41→        const a = (i * Math.PI * 2) / 3 - Math.PI / 2;
+    42→        if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    43→        else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    44→      }
+    45→      ctx.closePath();
+    46→      break;
+    47→    case 'square':
+    48→      ctx.rect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6);
+    49→      break;
+    50→    case 'diamond':
+    51→      ctx.moveTo(0, -r);
+    52→      ctx.lineTo(r * 0.8, 0);
+    53→      ctx.lineTo(0, r);
+    54→      ctx.lineTo(-r * 0.8, 0);
+    55→      ctx.closePath();
+    56→      break;
+    57→    case 'hexagon':
+    58→      for (let i = 0; i < 6; i++) {
+    59→        const a = (i * Math.PI * 2) / 6;
+    60→        if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    61→        else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    62→      }
+    63→      ctx.closePath();
+    64→      break;
+    65→    case 'pentagon':
+    66→      for (let i = 0; i < 5; i++) {
+    67→        const a = (i * Math.PI * 2) / 5 - Math.PI / 2;
+    68→        if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    69→        else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    70→      }
+    71→      ctx.closePath();
+    72→      break;
+    73→    case 'star':
+    74→      for (let i = 0; i < 10; i++) {
+    75→        const a = (i * Math.PI) / 5 - Math.PI / 2;
+    76→        const rad = i % 2 === 0 ? r : r * 0.5;
+    77→        if (i === 0) ctx.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+    78→        else ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+    79→      }
+    80→      ctx.closePath();
+    81→      break;
+    82→    default:
+    83→      ctx.arc(0, 0, r, 0, Math.PI * 2);
+    84→  }
+    85→}
+    86→
+    87→/** Запечённое ядро врага: градиентная заливка + glow-обводка + белая обводка. */
+    88→function getShapeSprite(shape: string, color: string, coreRadius: number): HTMLCanvasElement {
+    89→  const key = shape + '|' + color + '|' + coreRadius.toFixed(1);
+    90→  const cached = shapeSpriteCache.get(key);
+    91→  if (cached) return cached;
+    92→
+    93→  const margin = 12; // запас под широкую glow-обводку (lineWidth 15)
+    94→  const size = Math.ceil(coreRadius * 2 + margin * 2);
+    95→  const cv = document.createElement('canvas');
+    96→  cv.width = size;
+    97→  cv.height = size;
+    98→  const c = cv.getContext('2d')!;
+    99→  c.translate(size / 2, size / 2);
+   100→
+   101→  // Форма + радиальный градиент (как в оригинале: белый → цвет)
+   102→  c.beginPath();
+   103→  tracePath(c, shape, coreRadius);
+   104→  const grad = c.createRadialGradient(0, 0, 0, 0, 0, coreRadius);
+   105→  grad.addColorStop(0, '#ffffff');
+   106→  grad.addColorStop(0.3, color);
+   107→  grad.addColorStop(1, color);
+   108→  c.fillStyle = grad;
+   109→  c.fill();
+   110→
+   111→  // Широкая мягкая обводка-глоу + тонкая белая (как в оригинале)
+   112→  c.strokeStyle = color + '44';
+   113→  c.lineWidth = 15;
+   114→  c.stroke();
+   115→  c.strokeStyle = '#ffffff';
+   116→  c.lineWidth = 1.5;
+   117→  c.stroke();
+   118→
+   119→  shapeSpriteCache.set(key, cv);
+   120→  return cv;
+   121→}
+   122→
+   123→export type EnemyType = {
+   124→  id: string;
+   125→  name: string;
+   126→  color: string;
+   127→  glowColor: string;
+   128→  shape: 'circle' | 'triangle' | 'square' | 'hexagon' | 'star' | 'diamond' | 'pentagon' | 'blackhole';
+   129→  hp: number;
+   130→  maxHp: number;
+   131→  speed: number;
+   132→  damage: number;
+   133→  radius: number;
+   134→  points: number;
+   135→  pattern: 'straight' | 'zigzag' | 'spiral' | 'teleport' | 'chase' | 'bounce' | 'split' | 'stealth' | 'summoner' | 'boss_omega';
+   136→  special?: string;
+   137→  description: string;
+   138→};
+   139→
+   140→export type Enemy = EnemyType & {
+   141→  x: number;
+   142→  y: number;
+   143→  vx: number;
+   144→  vy: number;
+   145→  angle: number;
+   146→  zigzagTimer: number;
+   147→  teleportTimer: number;
+   148→  splitDone?: boolean;
+   149→  pulseRadius: number;
+   150→  pulseGrowing: boolean;
+   151→  flashTimer: number;
+   152→  bouncerEntered?: boolean;
+   153→  teleportAlpha?: number;
+   154→  teleportFading?: boolean;
+   155→  teleportsLeft?: number;
+   156→  teleportRingAnim?: number;
+   157→  summonTimer?: number;
+   158→  orbitPhase?: 'pull' | 'orbiting' | 'released';
+   159→  orbitAngle?: number;
+   160→  orbitRadius?: number;
+   161→  orbitTimer?: number;
+   162→  bossBuffed?: boolean;
+   163→};
+   164→
+   165→export type Projectile = {
+   166→  x: number;
+   167→  y: number;
+   168→  vx: number;
+   169→  vy: number;
+   170→  radius: number;
+   171→  trail: { x: number; y: number }[];
+   172→  damage: number;
+   173→  pierceLeft: number;
+   174→  hitEnemies: number[];
+   175→  isCrit?: boolean;
+   176→  isMagnet?: boolean;
+   177→  // ===== NEW upgrade fields =====
+   178→  ricochetLeft?: number;   // remaining bounces (ricochet upgrade)
+   179→  isEmpowered?: boolean;   // overcharge: glow + bonus damage
+   180→  isStorm?: boolean;        // arrowStorm rain arrow (doesn't consume ammo)
+   181→};
+   182→
+   183→export type Particle = {
+   184→  x: number;
+   185→  y: number;
+   186→  vx: number;
+   187→  vy: number;
+   188→  life: number;
+   189→  maxLife: number;
+   190→  color: string;
+   191→  radius: number;
+   192→};
+   193→
+   194→// Ambient dust particles for boss mode — gently drift, get attracted & absorbed by the boss.
+   195→export type DustParticle = {
+   196→  x: number;
+   197→  y: number;
+   198→  vx: number;
+   199→  vy: number;
+   200→  radius: number;
+   201→  baseAlpha: number;     // baseline visibility
+   202→  alpha: number;         // current alpha (fades when being absorbed)
+   203→  orbitAngle: number;    // spiral angle around boss
+   204→  absorbed: boolean;     // being consumed
+   205→  absorbProgress: number; // 0 → 1 as it's eaten
+   206→};
+   207→
+   208→export const ENEMY_TYPES: Omit<EnemyType, 'hp'>[] = [
+   209→  {
+   210→    id: 'scout',
+   211→    name: 'Скаут',
+   212→    color: '#00ff41',
+   213→    glowColor: 'rgba(0,255,65,0.6)',
+   214→    shape: 'circle',
+   215→    maxHp: 100, // 1 hit originally
+   216→    speed: 2.5,
+   217→    damage: 10,
+   218→    radius: 14,
+   219→    points: 10,
+   220→    pattern: 'straight',
+   221→    description: 'Быстрый и слабый. Умирает с одного попадания.',
+   222→  },
+   223→  {
+   224→    id: 'tank',
+   225→    name: 'Танк',
+   226→    color: '#ff6600',
+   227→    glowColor: 'rgba(255,102,0,0.6)',
+   228→    shape: 'hexagon',
+   229→    maxHp: 500, // 5 hits originally
+   230→    speed: 1.0,
+   231→    damage: 30,
+   232→    radius: 24,
+   233→    points: 40,
+   234→    pattern: 'straight',
+   235→    description: 'Медленный, но требует 5 попаданий. Наносит большой урон.',
+   236→  },
+   237→  {
+   238→    id: 'zigzagger',
+   239→    name: 'Зигзаг',
+   240→    color: '#ffff00',
+   241→    glowColor: 'rgba(255,255,0,0.6)',
+   242→    shape: 'diamond',
+   243→    maxHp: 200, // 2 hits
+   244→    speed: 2.0,
+   245→    damage: 15,
+   246→    radius: 16,
+   247→    points: 25,
+   248→    pattern: 'zigzag',
+   249→    special: 'Движется зигзагом',
+   250→    description: 'Движется зигзагом — сложно прицелиться. 2 попадания.',
+   251→  },
+   252→  {
+   253→    id: 'ghost',
+   254→    name: 'Призрак',
+   255→    color: '#bf00ff',
+   256→    glowColor: 'rgba(191,0,255,0.6)',
+   257→    shape: 'pentagon',
+   258→    maxHp: 300, // 3 hits
+   259→    speed: 1.8,
+   260→    damage: 20,
+   261→    radius: 18,
+   262→    points: 35,
+   263→    pattern: 'teleport',
+   264→    special: 'Телепортируется',
+   265→    description: 'Периодически телепортируется. Держи глаз востро!',
+   266→  },
+   267→  {
+   268→    id: 'splitter',
+   269→    name: 'Делитель',
+   270→    color: '#ff006e',
+   271→    glowColor: 'rgba(255,0,110,0.6)',
+   272→    shape: 'square',
+   273→    maxHp: 400, // 4 hits
+   274→    speed: 1.5,
+   275→    damage: 20,
+   276→    radius: 20,
+   277→    points: 50,
+   278→    pattern: 'straight',
+   279→    special: 'Делится при смерти',
+   280→    description: 'При гибели делится на 2 скаута. Будь осторожен!',
+   281→  },
+   282→  {
+   283→    id: 'berserker',
+   284→    name: 'Берсерк',
+   285→    color: '#ff0000',
+   286→    glowColor: 'rgba(255,0,0,0.7)',
+   287→    shape: 'star',
+   288→    maxHp: 300, // 3 hits
+   289→    speed: 3.5,
+   290→    damage: 30,
+   291→    radius: 17,
+   292→    points: 60,
+   293→    pattern: 'chase',
+   294→    special: 'Преследует игрока',
+   295→    description: 'Быстро несётся прямо на лук. Очень опасен!',
+   296→  },
+   297→  {
+   298→    id: 'bouncer',
+   299→    name: 'Рикошет',
+   300→    color: '#00ffff',
+   301→    glowColor: 'rgba(0,255,255,0.6)',
+   302→    shape: 'triangle',
+   303→    maxHp: 300, // 3 hits
+   304→    speed: 2.2,
+   305→    damage: 15,
+   306→    radius: 15,
+   307→    points: 45,
+   308→    pattern: 'bounce',
+   309→    special: 'Отражается от стен',
+   310→    description: 'Отскакивает от краёв экрана. Непредсказуемый!',
+   311→  },
+   312→  {
+   313→    id: 'spiraler',
+   314→    name: 'Вихрь',
+   315→    color: '#00e5ff',
+   316→    glowColor: 'rgba(0,229,255,0.6)',
+   317→    shape: 'diamond',
+   318→    maxHp: 200, // 2 hits
+   319→    speed: 3.2,
+   320→    damage: 15,
+   321→    radius: 14,
+   322→    points: 40,
+   323→    pattern: 'spiral',
+   324→    special: 'Орбитальное движение',
+   325→    description: 'Кружит вокруг лука, постепенно приближаясь. Очень юркий!',
+   326→  },
+   327→  {
+   328→    id: 'juggernaut',
+   329→    name: 'Джаггернаут',
+   330→    color: '#ff0033',
+   331→    glowColor: 'rgba(255,0,51,0.7)',
+   332→    shape: 'hexagon',
+   333→    maxHp: 1000, // 10 hits
+   334→    speed: 0.8,
+   335→    damage: 50,
+   336→    radius: 35,
+   337→    points: 150,
+   338→    pattern: 'chase',
+   339→    special: 'Тяжёлая броня',
+   340→    description: 'Огромный и медленный гигант. Пробивай его броню градом стрел!',
+   341→  },
+   342→  {
+   343→    id: 'phantom',
+   344→    name: 'Фантом',
+   345→    color: '#9d00ff',
+   346→    glowColor: 'rgba(157,0,255,0.6)',
+   347→    shape: 'triangle',
+   348→    maxHp: 200, // 2 hits
+   349→    speed: 1.8,
+   350→    damage: 25,
+   351→    radius: 16,
+   352→    points: 80,
+   353→    pattern: 'stealth',
+   354→    special: 'Невидимость',
+   355→    description: 'Скрывается в тени. Становится видимым только перед самой атакой!',
+   356→  },
+   357→  {
+   358→    id: 'necromancer',
+   359→    name: 'Некромант',
+   360→    color: '#ff00ff',
+   361→    glowColor: 'rgba(255,0,255,0.6)',
+   362→    shape: 'pentagon',
+   363→    maxHp: 800, // 8 hits
+   364→    speed: 0.6,
+   365→    damage: 40,
+   366→    radius: 28,
+   367→    points: 200,
+   368→    pattern: 'summoner',
+   369→    special: 'Призывает миньонов',
+   370→    description: 'Держится на расстоянии и постоянно призывает скаутов. Уничтожь его быстрее!',
+   371→  },
+   372→  {
+   373→    id: 'boss_omega',
+   374→    name: 'Омега',
+   375→    color: '#000000',
+   376→    glowColor: '#8000ff',
+   377→    shape: 'blackhole',
+   378→    hp: 20000,
+   379→    maxHp: 20000, 
+   380→    speed: 1.2,
+   381→    damage: 100,
+   382→    radius: 70,
+   383→    points: 500000,
+   384→    pattern: 'boss_omega',
+   385→    special: 'Чёрная дыра, рой',
+   386→    description: 'Ультимативная машина смерти! Долгий эпичный бой.',
+   387→  }
+   388→];
+   389→
+   390→export function createEnemy(
+   391→  type: Omit<EnemyType, 'hp'>,
+   392→  canvasW: number,
+   393→  canvasH: number,
+   394→  overrides?: Partial<Enemy>
+   395→): Enemy {
+   396→  if (!type) {
+   397→    type = ENEMY_TYPES.find(t => t.id === 'scout')!;
+   398→  }
+   399→  const side = Math.floor(Math.random() * 4);
+   400→  let spawnX = 0, spawnY = 0;
+   401→  const margin = 60;
+   402→  switch (side) {
+   403→    case 0: spawnX = Math.random() * canvasW; spawnY = -margin; break;
+   404→    case 1: spawnX = canvasW + margin; spawnY = Math.random() * canvasH; break;
+   405→    case 2: spawnX = Math.random() * canvasW; spawnY = canvasH + margin; break;
+   406→    case 3: spawnX = -margin; spawnY = Math.random() * canvasH; break;
+   407→  }
+   408→
+   409→  const finalX = overrides?.x ?? spawnX;
+   410→  const finalY = overrides?.y ?? spawnY;
+   411→  const speed = type.speed * (0.85 + Math.random() * 0.3);
+   412→  
+   413→  let angle;
+   414→  if (type.id === 'bouncer' && !overrides) {
+   415→    // Ricochet should aim at a wall, not the player
+   416→    const targetSide = (side + 1 + Math.floor(Math.random() * 3)) % 4;
+   417→    let tx = 0, ty = 0;
+   418→    switch (targetSide) {
+   419→      case 0: tx = Math.random() * canvasW; ty = 0; break;
+   420→      case 1: tx = canvasW; ty = Math.random() * canvasH; break;
+   421→      case 2: tx = Math.random() * canvasW; ty = canvasH; break;
+   422→      case 3: tx = 0; ty = Math.random() * canvasH; break;
+   423→    }
+   424→    angle = Math.atan2(ty - finalY, tx - finalX);
+   425→  } else {
+   426→    // Default: aim at player (center)
+   427→    angle = Math.atan2(canvasH / 2 - finalY, canvasW / 2 - finalX);
+   428→  }
+   429→
+   430→  return {
+   431→    ...type,
+   432→    hp: type.maxHp,
+   433→    x: finalX,
+   434→    y: finalY,
+   435→    vx: Math.cos(angle) * speed,
+   436→    vy: Math.sin(angle) * speed,
+   437→    angle,
+   438→    trail: [],
+   439→    zigzagTimer: 0,
+   440→    teleportTimer: type.id === 'phantom' ? Math.random() * 60 : Math.random() * 180,
+   441→    splitDone: false,
+   442→    pulseRadius: type.radius,
+   443→    pulseGrowing: true,
+   444→    flashTimer: 0,
+   445→    bouncerEntered: false,
+   446→    teleportAlpha: (type.pattern === 'teleport' || type.pattern === 'stealth') ? 0 : 1,
+   447→    teleportFading: false,
+   448→    teleportsLeft: type.pattern === 'teleport' ? 2 + Math.floor(Math.random() * 3) : 0,
+   449→    teleportRingAnim: 0,
+   450→    ...overrides,
+   451→  };
+   452→}
+   453→
+   454→export function drawShape(
+   455→  ctx: CanvasRenderingContext2D,
+   456→  shape: EnemyType['shape'],
+   457→  x: number,
+   458→  y: number,
+   459→  radius: number,
+   460→  color: string,
+   461→  glowColor: string,
+   462→  rotation: number = 0,
+   463→  flashTimer: number = 0,
+   464→  hp: number = 0,
+   465→  maxHp: number = 1,
+   466→) {
+   467→  ctx.save();
+   468→  ctx.translate(x, y);
+   469→  ctx.rotate(rotation);
+   470→
+   471→  const flashAlpha = flashTimer > 0 ? 1 : 0;
+   472→  
+   473→  if (shape === 'blackhole') {
+   474→    // ===== Epic Boss "Omega" render — layered cosmic horror (heavily optimized) =====
+   475→    const time = Date.now();
+   476→    // Phase indicator: 0 (full hp) → 2 (near death), intensifies visuals.
+   477→    // Guard against invalid/missing hp values (defaults: hp=0, maxHp=1 → treat as full).
+   478→    const hpRatio = (maxHp > 0 && hp > 0) ? hp / maxHp : 1;
+   479→    const phase = Math.min(2, Math.floor((1 - hpRatio) * 3));
+   480→    const danger = 0.3 + phase * 0.35; // 0.3 → 1.0 as boss takes damage
+   481→
+   482→    // Pulsing factor
+   483→    const pulse = 1 + Math.sin(time / 280) * 0.04;
+   484→
+   485→    // Precomputed phase-dependent colors (single source of truth)
+   486→    const isCritical = phase >= 2;
+   487→    const isDamaged = phase >= 1;
+   488→    const haloR = isCritical ? 255 : 128;
+   489→    const haloG = isCritical ? 30 : 0;
+   490→    const haloB = isCritical ? 60 : 255;
+   491→    const accentColor = isCritical ? '#ff0044' : (isDamaged ? '#ff0066' : '#ffffff');
+   492→    const sparkColor = isDamaged ? '#ffccff' : '#ffffff';
+   493→    const rimColor = isCritical ? 'rgba(255, 51, 102, 0.9)' : 'rgba(255, 255, 255, 0.85)';
+   494→    const rimGlowColor = isCritical ? '#ff0044' : glowColor;
+   495→    const diskInnerColor = isDamaged ? '#ff66aa' : '#dd99ff';
+   496→    const photonRingColor = isCritical ? '#ff3366' : '#ffffff';
+   497→
+   498→    // ---- Precomputed geometry (avoid recomputing in loops) ----
+   499→    const lensR = radius * 3.2 * pulse;
+   500→    const diskR = radius * 2.6;
+   501→    const midRingR = radius * 2.25;
+   502→    const photonR = radius * 1.95;
+   503→    const perpR = radius * 2.9;
+   504→    const perpInnerR = radius * 2.5;
+   505→    const eventR = radius * 1.15 * pulse;
+   506→    const rimR = radius * 1.05 * pulse;
+   507→    const coreR = radius * 0.55 * pulse;
+   508→    const TAU = Math.PI * 2;
+   509→
+   510→    // Layer 0 — Massive outer gravitational lens halo (color shifts red on damage)
+   511→    // Gradient is unavoidable here (needs radial fade), but only ONE fill.
+   512→    ctx.save();
+   513→    ctx.globalCompositeOperation = 'lighter';
+   514→    const lensGrad = ctx.createRadialGradient(0, 0, radius * 1.2, 0, 0, lensR);
+   515→    lensGrad.addColorStop(0, `rgba(${haloR}, ${haloG}, ${haloB}, ${0.18 + danger * 0.1})`);
+   516→    lensGrad.addColorStop(0.5, `rgba(${haloR}, ${haloG}, ${haloB}, ${0.08 + danger * 0.05})`);
+   517→    lensGrad.addColorStop(1, 'rgba(0,0,0,0)');
+   518→    ctx.beginPath();
+   519→    ctx.arc(0, 0, lensR, 0, TAU);
+   520→    ctx.fillStyle = lensGrad;
+   521→    ctx.fill();
+   522→    ctx.restore();
+   523→
+   524→    // Layer 1 — Rotating accretion disk (main, tilted, multi-band gradient)
+   525→    // Single save/restore + single shadowBlur for the whole disk group.
+   526→    ctx.save();
+   527→    ctx.rotate(rotation * 1.8);
+   528→    ctx.scale(1, 0.32);
+   529→    ctx.shadowBlur = 35;
+   530→    ctx.shadowColor = accentColor;
+   531→    // Outer disk band — gradient stroke
+   532→    ctx.beginPath();
+   533→    ctx.arc(0, 0, diskR, 0, TAU);
+   534→    const diskGrad = ctx.createRadialGradient(0, 0, radius * 0.9, 0, 0, diskR);
+   535→    diskGrad.addColorStop(0, '#ffffff');
+   536→    diskGrad.addColorStop(0.15, diskInnerColor);
+   537→    diskGrad.addColorStop(0.4, glowColor);
+   538→    diskGrad.addColorStop(0.7, glowColor + 'aa');
+   539→    diskGrad.addColorStop(1, 'rgba(0,0,0,0)');
+   540→    ctx.strokeStyle = diskGrad;
+   541→    ctx.lineWidth = 22;
+   542→    ctx.stroke();
+   543→
+   544→    // Mid bright ring + Inner photon ring (shared shadowBlur=10, then reset)
+   545→    ctx.shadowBlur = 10;
+   546→    ctx.beginPath();
+   547→    ctx.arc(0, 0, midRingR, 0, TAU);
+   548→    ctx.strokeStyle = `rgba(255, 255, 255, ${0.7 + danger * 0.3})`;
+   549→    ctx.lineWidth = 5;
+   550→    ctx.stroke();
+   551→
+   552→    ctx.beginPath();
+   553→    ctx.arc(0, 0, photonR, 0, TAU);
+   554→    ctx.strokeStyle = photonRingColor;
+   555→    ctx.lineWidth = 2.5;
+   556→    ctx.stroke();
+   557→    ctx.shadowBlur = 0;
+   558→    ctx.restore();
+   559→
+   560→    // Layer 2 — Perpendicular secondary disk (gives 3D volume)
+   561→    ctx.save();
+   562→    ctx.rotate(-rotation * 1.3 + Math.PI / 3);
+   563→    ctx.scale(0.22, 1);
+   564→    ctx.shadowBlur = 18;
+   565→    ctx.shadowColor = glowColor;
+   566→    ctx.beginPath();
+   567→    ctx.arc(0, 0, perpR, 0, TAU);
+   568→    ctx.strokeStyle = glowColor;
+   569→    ctx.lineWidth = 10;
+   570→    ctx.stroke();
+   571→    // thinner inner accent
+   572→    ctx.beginPath();
+   573→    ctx.arc(0, 0, perpInnerR, 0, TAU);
+   574→    ctx.strokeStyle = `rgba(255,255,255,${0.4 + danger * 0.3})`;
+   575→    ctx.lineWidth = 2;
+   576→    ctx.stroke();
+   577→    ctx.shadowBlur = 0;
+   578→    ctx.restore();
+   579→
+   580→    // Layer 3 — Orbiting energy sparks (radiating from the disk)
+   581→    // Optimized: group glow-pass and core-pass separately to minimize fillStyle switches.
+   582→    ctx.save();
+   583→    ctx.globalCompositeOperation = 'lighter';
+   584→    const sparkCount = 7 + phase * 2;
+   585→    const glowAlpha = 0.15 + danger * 0.1;
+   586→    // First pass: all glows (single fillStyle)
+   587→    ctx.fillStyle = `rgba(255, 255, 255, ${glowAlpha})`;
+   588→    for (let i = 0; i < sparkCount; i++) {
+   589→      const sa = rotation * 2.5 + (TAU / sparkCount) * i;
+   590→      const sr = radius * (1.8 + Math.sin(time / 200 + i) * 0.4);
+   591→      const sparkR = 3 + Math.sin(time / 120 + i * 1.7) * 1.5;
+   592→      ctx.beginPath();
+   593→      ctx.arc(Math.cos(sa) * sr, Math.sin(sa) * sr * 0.35, sparkR * 3, 0, TAU);
+   594→      ctx.fill();
+   595→    }
+   596→    // Second pass: all cores (single fillStyle)
+   597→    ctx.fillStyle = sparkColor;
+   598→    for (let i = 0; i < sparkCount; i++) {
+   599→      const sa = rotation * 2.5 + (TAU / sparkCount) * i;
+   600→      const sr = radius * (1.8 + Math.sin(time / 200 + i) * 0.4);
+   601→      const sparkR = 3 + Math.sin(time / 120 + i * 1.7) * 1.5;
+   602→      ctx.beginPath();
+   603→      ctx.arc(Math.cos(sa) * sr, Math.sin(sa) * sr * 0.35, sparkR, 0, TAU);
+   604→      ctx.fill();
+   605→    }
+   606→    ctx.restore();
+   607→
+   608→    // Layer 4 — Event horizon (dark void with colored rim)
+   609→    ctx.beginPath();
+   610→    ctx.arc(0, 0, eventR, 0, TAU);
+   611→    const voidGrad = ctx.createRadialGradient(0, 0, radius * 0.7, 0, 0, eventR);
+   612→    voidGrad.addColorStop(0, '#000000');
+   613→    voidGrad.addColorStop(0.7, '#000000');
+   614→    voidGrad.addColorStop(0.92, isCritical ? '#660022' : glowColor + '88');
+   615→    voidGrad.addColorStop(1, 'rgba(0,0,0,0)');
+   616→    ctx.fillStyle = voidGrad;
+   617→    ctx.fill();
+   618→
+   619→    // Layer 5 — Inner glowing rim around the singularity
+   620→    ctx.beginPath();
+   621→    ctx.arc(0, 0, rimR, 0, TAU);
+   622→    ctx.strokeStyle = rimColor;
+   623→    ctx.lineWidth = 3;
+   624→    ctx.shadowBlur = 20;
+   625→    ctx.shadowColor = rimGlowColor;
+   626→    ctx.stroke();
+   627→    ctx.shadowBlur = 0;
+   628→
+   629→    // Layer 6 — Pulsing energy arcs inside the void (phase 1+)
+   630→    // Optimized: single beginPath for all arcs of the same style (where possible),
+   631→    // single shadowBlur set, precompute radii once.
+   632→    if (isDamaged) {
+   633→      ctx.save();
+   634→      ctx.globalCompositeOperation = 'lighter';
+   635→      ctx.shadowBlur = 10;
+   636→      ctx.shadowColor = rimGlowColor;
+   637→      const arcCount = 3 + phase;
+   638→      ctx.strokeStyle = isCritical ? 'rgba(255, 80, 120, 0.7)' : 'rgba(200, 120, 255, 0.6)';
+   639→      ctx.lineWidth = 2;
+   640→      // Precompute arc parameters
+   641→      const baseRot = rotation * 4;
+   642→      const t180 = time / 180;
+   643→      const t250 = time / 250;
+   644→      for (let i = 0; i < arcCount; i++) {
+   645→        const aa = baseRot + (TAU / arcCount) * i;
+   646→        const arcLen = Math.PI * (0.3 + Math.sin(t180 + i) * 0.15);
+   647→        const arcRad = radius * (0.55 + Math.sin(t250 + i) * 0.1);
+   648→        ctx.beginPath();
+   649→        ctx.arc(0, 0, arcRad, aa, aa + arcLen);
+   650→        ctx.stroke();
+   651→      }
+   652→      ctx.shadowBlur = 0;
+   653→      ctx.restore();
+   654→    }
+   655→
+   656→    // Layer 7 — Core singularity (pure black, absorbs light)
+   657→    ctx.beginPath();
+   658→    ctx.arc(0, 0, coreR, 0, TAU);
+   659→    ctx.fillStyle = '#000000';
+   660→    ctx.fill();
+   661→
+   662→    // Layer 8 — Phase warning glow (pulses red when boss is near death)
+   663→    if (isCritical) {
+   664→      const warnAlpha = (Math.sin(time / 150) + 1) / 2 * 0.4;
+   665→      ctx.beginPath();
+   666→      ctx.arc(0, 0, radius * 1.4, 0, TAU);
+   667→      ctx.fillStyle = `rgba(255, 0, 51, ${warnAlpha})`;
+   668→      ctx.globalCompositeOperation = 'lighter';
+   669→      ctx.fill();
+   670→      ctx.globalCompositeOperation = 'source-over';
+   671→    }
+   672→
+   673→    // Flash effect (when hit)
+   674→    if (flashTimer > 0) {
+   675→      ctx.beginPath();
+   676→      ctx.arc(0, 0, radius * 1.3, 0, TAU);
+   677→      ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha * 0.85})`;
+   678→      ctx.fill();
+   679→    }
+   680→
+   681→    ctx.restore();
+   682→    return;
+   683→  }
+   684→  
+   685→  if (shape !== 'blackhole') {
+   686→    // Note: Removed global shadowBlur for performance
+   687→  }
+   688→
+   689→  const drawPart = (pathFn: () => void, partColor: string = color, scale: number = 1, isCore: boolean = false) => {
+   690→    ctx.save();
+   691→    ctx.beginPath();
+   692→    pathFn();
+   693→    
+   694→    if (flashTimer > 0) {
+   695→      ctx.fillStyle = `rgba(255,255,255,${flashAlpha * 0.9})`;
+   696→      ctx.fill();
+   697→      ctx.strokeStyle = '#ffffff';
+   698→      ctx.lineWidth = isCore ? 2 : 4;
+   699→      ctx.stroke();
+   700→    } else {
+   701→      if (isCore) {
+   702→        // Cached time (shared across all drawPart calls for this enemy)
+   703→        const now = Date.now();
+   704→        const pulse = Math.sin(rotation * 12) * 0.15 + 0.85; 
+   705→        const coreRadius = radius * scale;
+   706→        const TAU = Math.PI * 2;
+   707→
+   708→        // 1. Energy Aura — запечённый спрайт (идентичен старому градиенту,
+   709→        // но без createRadialGradient в каждом кадре)
+   710→        ctx.save();
+   711→        ctx.globalCompositeOperation = 'lighter';
+   712→        const auraR = coreRadius * 3 * pulse;
+   713→        ctx.drawImage(getAuraSprite(color), -auraR, -auraR, auraR * 2, auraR * 2);
+   714→        ctx.restore();
+   715→
+   716→        // 1.5. Radiating sparks — batched: glow pass + core pass (2 fillStyle changes total)
+   717→        ctx.save();
+   718→        ctx.globalCompositeOperation = 'lighter';
+   719→        const now100 = now / 100;
+   720→        // Precompute spark positions
+   721→        const sparkPositions: { x: number; y: number }[] = [];
+   722→        for (let i = 0; i < 5; i++) {
+   723→          const sparkAngle = rotation * 2 + (TAU / 5) * i;
+   724→          const sparkDist = coreRadius * 1.5 + Math.sin(now100 + i) * coreRadius;
+   725→          sparkPositions.push({ x: Math.cos(sparkAngle) * sparkDist, y: Math.sin(sparkAngle) * sparkDist });
+   726→        }
+   727→        // Glow pass (single fillStyle)
+   728→        ctx.fillStyle = color + '66';
+   729→        for (let i = 0; i < 5; i++) {
+   730→          ctx.beginPath();
+   731→          ctx.arc(sparkPositions[i].x, sparkPositions[i].y, 4 * pulse, 0, TAU);
+   732→          ctx.fill();
+   733→        }
+   734→        // Core pass (single fillStyle)
+   735→        ctx.fillStyle = '#ffffff';
+   736→        for (let i = 0; i < 5; i++) {
+   737→          ctx.beginPath();
+   738→          ctx.arc(sparkPositions[i].x, sparkPositions[i].y, 1.5 * pulse, 0, TAU);
+   739→          ctx.fill();
+   740→        }
+   741→        ctx.restore();
+   742→
+   743→        // 2. Swirling Vortex — reduced from 3 layers to 2 for performance,
+   744→        // keeping the visual volume via thicker lines + fake glow.
+   745→        ctx.save();
+   746→        ctx.globalCompositeOperation = 'lighter';
+   747→        ctx.rotate(rotation * 1.5);
+   748→        const now300 = now / 300;
+   749→        const sin300 = Math.sin(now300);
+   750→        const cos300 = Math.cos(now300);
+   751→        for (let layer = 0; layer < 2; layer++) {
+   752→          ctx.beginPath();
+   753→          const numArms = 3 + layer; 
+   754→          const layerRadius = coreRadius * (3.0 - layer * 0.5);
+   755→          const offset = rotation * (layer * 0.4);
+   756→          
+   757→          for (let i = 0; i < numArms; i++) {
+   758→            const a = (TAU / numArms) * i + offset;
+   759→            ctx.moveTo(0, 0);
+   760→            ctx.bezierCurveTo(
+   761→              Math.cos(a) * layerRadius * 0.3, Math.sin(a) * layerRadius * 0.3,
+   762→              Math.cos(a + 1.2) * layerRadius * 0.7, Math.sin(a + 1.2) * layerRadius * 0.7,
+   763→              Math.cos(a + 2.0) * sin300 * layerRadius, Math.sin(a + 2.0) * cos300 * layerRadius
+   764→            );
+   765→          }
+   766→          
+   767→          ctx.strokeStyle = layer === 1 ? '#ffffff' : color;
+   768→          ctx.globalAlpha = layer === 1 ? 0.2 * pulse : 0.27 * pulse;
+   769→          ctx.lineWidth = (12 - layer * 3) * pulse;
+   770→          ctx.lineCap = 'round';
+   771→          ctx.stroke();
+   772→          // Fake glow
+   773→          ctx.lineWidth = (12 - layer * 3) * pulse * 2.5;
+   774→          ctx.globalAlpha = ctx.globalAlpha * 0.3;
+   775→          ctx.stroke();
+   776→        }
+   777→        ctx.restore();
+   778→
+   779→        // 3. Main Core Shape — запечённый спрайт (градиент + glow-обводка +
+   780→        // белая обводка за один drawImage; рисуется в натуральном размере,
+   781→        // поэтому ширины обводок совпадают с оригиналом)
+   782→        const coreSpr = getShapeSprite(shape as string, color, coreRadius);
+   783→        const halfSpr = coreSpr.width / 2;
+   784→        ctx.drawImage(coreSpr, -halfSpr, -halfSpr);
+   785→        
+   786→        // 4. Inner Rotating Energy (путь ядра: radius * 0.4 — как в оригинале)
+   787→        ctx.save();
+   788→        ctx.rotate(-rotation * 5);
+   789→        ctx.scale(0.6 * pulse, 0.6 * pulse);
+   790→        ctx.beginPath();
+   791→        tracePath(ctx, shape as string, radius * 0.4);
+   792→        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+   793→        ctx.lineWidth = 8;
+   794→        ctx.stroke();
+   795→        ctx.fillStyle = '#ffffff';
+   796→        ctx.fill();
+   797→        ctx.restore();
+   798→        
+   799→        // 5. Center Spark
+   800→        ctx.beginPath();
+   801→        ctx.arc(0, 0, coreRadius * 0.2, 0, TAU);
+   802→        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+   803→        ctx.lineWidth = 5;
+   804→        ctx.stroke();
+   805→        ctx.fillStyle = '#ffffff';
+   806→        ctx.fill();
+   807→      } else {
+   808→        // Dynamic Neon Wireframe style — cached Date.now()
+   809→        const now = Date.now();
+   810→        const TAU = Math.PI * 2;
+   811→        ctx.fillStyle = partColor + '15';
+   812→        ctx.fill();
+   813→
+   814→        // Fake outer glow
+   815→        const pulseGlow = Math.sin(now / 200) * 5 + 10;
+   816→        ctx.strokeStyle = partColor + '44';
+   817→        ctx.lineWidth = pulseGlow;
+   818→        ctx.stroke();
+   819→
+   820→        ctx.strokeStyle = partColor;
+   821→        ctx.lineWidth = 3;
+   822→        ctx.stroke();
+   823→
+   824→        // Inner geometric floating lines
+   825→        ctx.save();
+   826→        ctx.rotate(rotation * 0.5);
+   827→        ctx.beginPath();
+   828→        ctx.scale(0.8, 0.8);
+   829→        pathFn();
+   830→        ctx.strokeStyle = partColor + '88';
+   831→        ctx.setLineDash(DASH_ENEMY_INNER);
+   832→        ctx.lineWidth = 2;
+   833→        ctx.stroke();
+   834→        ctx.setLineDash([]);
+   835→        ctx.restore();
+   836→
+   837→        // Third layer: spinning arcs inside
+   838→        ctx.save();
+   839→        ctx.rotate(rotation * 1.5);
+   840→        ctx.beginPath();
+   841→        ctx.arc(0, 0, radius * 0.7, 0, Math.PI);
+   842→        ctx.strokeStyle = partColor + 'dd';
+   843→        ctx.lineWidth = 1;
+   844→        ctx.stroke();
+   845→        ctx.beginPath();
+   846→        ctx.arc(0, 0, radius * 0.5, Math.PI, Math.PI * 2);
+   847→        ctx.strokeStyle = '#ffffff88';
+   848→        ctx.lineWidth = 1.5;
+   849→        ctx.stroke();
+   850→        ctx.restore();
+   851→
+   852→        // Second inner layer rotating in opposite direction
+   853→        ctx.save();
+   854→        ctx.rotate(-rotation * 0.8);
+   855→        ctx.beginPath();
+   856→        ctx.scale(0.6, 0.6);
+   857→        pathFn();
+   858→        ctx.strokeStyle = '#ffffffaa';
+   859→        ctx.lineJoin = 'round';
+   860→        ctx.lineWidth = 1.5;
+   861→        ctx.stroke();
+   862→        ctx.restore();
+   863→
+   864→        // Glass reflection — запечённый спрайт (клип по внутренней фигуре,
+   865→        // как в оригинальной логике путей)
+   866→        ctx.save();
+   867→        ctx.save();
+   868→        ctx.rotate(-rotation * 0.8);
+   869→        ctx.scale(0.6, 0.6);
+   870→        ctx.beginPath();
+   871→        tracePath(ctx, shape as string, radius);
+   872→        ctx.restore();
+   873→        ctx.clip();
+   874→        ctx.drawImage(
+   875→          getSheenSprite(),
+   876→          -radius * scale, -radius * scale,
+   877→          radius * 2 * scale, radius * 2 * scale,
+   878→        );
+   879→        ctx.restore();
+   880→      }
+   881→    }
+   882→    ctx.restore();
+   883→  };
+   884→
+   885→  // Draw outer 3D shape
+   886→  drawPart(() => tracePath(ctx, shape as string, radius), color, 1, false);
+   887→  
+   888→  // Draw inner glowing core
+   889→  drawPart(() => tracePath(ctx, shape as string, radius * 0.4), '#ffffff', 0.4, true);
+   890→
+   891→  ctx.restore();
+   892→}

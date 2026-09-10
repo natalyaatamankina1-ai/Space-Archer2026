@@ -1,0 +1,1105 @@
+     1→/**
+     2→ * @fileoverview Рендеринг игры на Canvas 2D.
+     3→ *
+     4→ * Все функции отрисовки вынесены сюда из игрового цикла для чистоты:
+     5→ * - renderBackground: космический фон (звёзды, туманности, сетка, кольца)
+     6→ * - renderParticles: частицы (взрывы, попадания)
+     7→ * - renderShockwaves: ударные волны (синие, от улучшения)
+     8→ * - renderDustParticles: пыль в режиме босса
+     9→ * - renderGravityBeams: фиолетовые лучи босса к врагам
+    10→ * - renderMiniBlackHoles: мини-чёрные дыры (поглощают стрелы)
+    11→ * - renderProjectiles: стрелы (обычные, крит, магнитные)
+    12→ * - renderEnemies: враги + их HP-бары + босс
+    13→ * - renderBow: лук игрока + прицел + стрелу на тетиве
+    14→ * - renderReload: индикатор перезарядки
+    15→ *
+    16→ * Вызываются из useGameLoop.ts в секции «Draw» каждый кадр.
+    17→ *
+    18→ * @see useGameLoop.ts — где вызываются эти функции
+    19→ * @see enemies.ts → drawShape — универсальная отрисовка фигур врагов
+    20→ */
+    21→
+    22→import { Enemy, Particle, Projectile, drawShape } from './enemies';
+    23→import { InternalGameState } from './gameLogic';
+    24→
+    25→export function renderBackground(ctx: CanvasRenderingContext2D, W: number, H: number, frame: number, cx: number, cy: number) {
+    26→  ctx.clearRect(0, 0, W, H);
+    27→
+    28→  // Deep space gradient
+    29→  const bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H));
+    30→  bgGrad.addColorStop(0, '#0a0520');
+    31→  bgGrad.addColorStop(1, '#020108');
+    32→  ctx.fillStyle = bgGrad;
+    33→  ctx.fillRect(0, 0, W, H);
+    34→
+    35→  // Nebulae (Gas clouds)
+    36→  ctx.globalCompositeOperation = 'screen';
+    37→  const t = frame * 0.002;
+    38→  const drawNebula = (nx: number, ny: number, r: number, color: string) => {
+    39→    const nGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, r);
+    40→    nGrad.addColorStop(0, color);
+    41→    nGrad.addColorStop(1, 'transparent');
+    42→    ctx.fillStyle = nGrad;
+    43→    ctx.beginPath();
+    44→    ctx.arc(nx, ny, r, 0, Math.PI * 2);
+    45→    ctx.fill();
+    46→  };
+    47→  drawNebula(W * 0.2 + Math.sin(t) * 150, H * 0.3 + Math.cos(t * 0.8) * 150, Math.max(W, H) * 0.5, 'rgba(100, 0, 255, 0.07)');
+    48→  drawNebula(W * 0.8 + Math.cos(t * 1.2) * 150, H * 0.7 + Math.sin(t * 1.1) * 150, Math.max(W, H) * 0.4, 'rgba(0, 200, 255, 0.06)');
+    49→  drawNebula(W * 0.5 + Math.sin(t * 0.5) * 200, H * 0.9 + Math.cos(t * 0.7) * 100, Math.max(W, H) * 0.4, 'rgba(255, 0, 100, 0.04)');
+    50→  ctx.globalCompositeOperation = 'source-over';
+    51→
+    52→  // Parallax Stars
+    53→  for (let i = 0; i < 150; i++) {
+    54→    const origX = (Math.sin(i * 123.45) * 0.5 + 0.5) * W;
+    55→    const origY = (Math.cos(i * 678.90) * 0.5 + 0.5) * H;
+    56→    
+    57→    const layer = i % 3; // 0: far, 1: mid, 2: close
+    58→    const speed = (layer + 1) * 0.15;
+    59→    const size = (layer === 2 ? 1.5 : 0.8) * (Math.sin(frame * 0.03 + i) * 0.4 + 0.6);
+    60→    
+    61→    const x = (origX - frame * speed) % W;
+    62→    const y = (origY + frame * speed * 0.3) % H;
+    63→    
+    64→    // Handle negative modulo for smooth wrapping
+    65→    const wrapX = x < 0 ? x + W : x;
+    66→    const wrapY = y < 0 ? y + H : y;
+    67→
+    68→    ctx.fillStyle = layer === 2 ? 'rgba(255, 255, 255, 0.9)' : (layer === 1 ? 'rgba(150, 200, 255, 0.6)' : 'rgba(100, 100, 150, 0.3)');
+    69→    ctx.beginPath();
+    70→    ctx.arc(wrapX, wrapY, size, 0, Math.PI * 2);
+    71→    ctx.fill();
+    72→    
+    73→    // Add a slight glow to close stars
+    74→    if (layer === 2 && Math.sin(frame * 0.05 + i) > 0.8) {
+    75→      ctx.beginPath();
+    76→      ctx.arc(wrapX, wrapY, size * 2.5, 0, Math.PI * 2);
+    77→      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    78→      ctx.fill();
+    79→    }
+    80→  }
+    81→
+    82→  // Grid with perspective-like pulse (keep it subtle for the neon arcade feel)
+    83→  ctx.strokeStyle = 'rgba(0,255,255,0.03)';
+    84→  ctx.lineWidth = 1;
+    85→  const gridSize = 80;
+    86→  const offsetX = (frame * 0.2) % gridSize;
+    87→  const offsetY = (frame * 0.2) % gridSize;
+    88→
+    89→  ctx.beginPath();
+    90→  for (let gx = offsetX; gx < W; gx += gridSize) {
+    91→    ctx.moveTo(gx, 0); ctx.lineTo(gx, H);
+    92→  }
+    93→  for (let gy = offsetY; gy < H; gy += gridSize) {
+    94→    ctx.moveTo(0, gy); ctx.lineTo(W, gy);
+    95→  }
+    96→  ctx.stroke();
+    97→
+    98→  // Center rings with glow
+    99→  for (let r = 80; r < Math.max(W, H); r += 150) {
+   100→    ctx.beginPath();
+   101→    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+   102→    const alpha = 0.02 + 0.02 * Math.sin(frame * 0.015 + r * 0.001);
+   103→    ctx.strokeStyle = `rgba(0,255,255,${alpha})`;
+   104→    ctx.lineWidth = 2;
+   105→    ctx.stroke();
+   106→  }
+   107→}
+   108→
+   109→export function renderParticles(ctx: CanvasRenderingContext2D, particles: Particle[]) {
+   110→  const TAU = Math.PI * 2;
+   111→  // Precompute alpha hex strings (0-255 → "00".."ff") to avoid per-particle
+   112→  // string concatenation + Math.floor + toString in the hot loop.
+   113→  const alphaHex: string[] = new Array(256);
+   114→  for (let a = 0; a < 256; a++) {
+   115→    alphaHex[a] = a.toString(16).padStart(2, '0');
+   116→  }
+   117→
+   118→  for (let i = 0; i < particles.length; i++) {
+   119→    const p = particles[i];
+   120→    const alpha = p.life / p.maxLife;
+   121→    const r = p.radius * alpha;
+   122→
+   123→    // Fake glow
+   124→    const glowAlphaByte = Math.min(255, Math.floor(alpha * 0.3 * 255));
+   125→    ctx.beginPath();
+   126→    ctx.arc(p.x, p.y, r * 2.5, 0, TAU);
+   127→    ctx.fillStyle = p.color + alphaHex[glowAlphaByte];
+   128→    ctx.fill();
+   129→
+   130→    // Core
+   131→    const coreAlphaByte = Math.min(255, Math.floor(alpha * 255));
+   132→    ctx.beginPath();
+   133→    ctx.arc(p.x, p.y, r, 0, TAU);
+   134→    ctx.fillStyle = p.color + alphaHex[coreAlphaByte];
+   135→    ctx.fill();
+   136→  }
+   137→}
+   138→
+   139→export function renderShockwaves(ctx: CanvasRenderingContext2D, shockwaves: { x: number; y: number; radius: number; life: number; maxLife: number }[]) {
+   140→  shockwaves.forEach(sw => {
+   141→    const alpha = sw.life / sw.maxLife;
+   142→    const t = 1 - alpha; // 0 at start, 1 at end
+   143→
+   144→    // Outer glow ring (wide, soft) — blue
+   145→    ctx.beginPath();
+   146→    ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+   147→    ctx.strokeStyle = `rgba(0, 170, 255, ${alpha * 0.25})`;
+   148→    ctx.lineWidth = 18;
+   149→    ctx.stroke();
+   150→
+   151→    // Mid ring (main wave color) — blue
+   152→    ctx.beginPath();
+   153→    ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+   154→    ctx.strokeStyle = `rgba(0, 170, 255, ${alpha * 0.85})`;
+   155→    ctx.lineWidth = 5;
+   156→    ctx.stroke();
+   157→
+   158→    // Bright inner edge
+   159→    ctx.beginPath();
+   160→    ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+   161→    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+   162→    ctx.lineWidth = 2;
+   163→    ctx.stroke();
+   164→
+   165→    // Trailing inner ring (slightly smaller, fading) — blue
+   166→    if (t > 0.1) {
+   167→      ctx.beginPath();
+   168→      ctx.arc(sw.x, sw.y, sw.radius * 0.82, 0, Math.PI * 2);
+   169→      ctx.strokeStyle = `rgba(0, 170, 255, ${alpha * 0.4})`;
+   170→      ctx.lineWidth = 3;
+   171→      ctx.stroke();
+   172→    }
+   173→  });
+   174→}
+   175→
+   176→export function renderDustParticles(ctx: CanvasRenderingContext2D, dust: { x: number; y: number; radius: number; alpha: number; absorbed: boolean; absorbProgress: number }[]) {
+   177→  // Very faint ambient dust — use 'lighter' for a subtle glow blend.
+   178→  ctx.save();
+   179→  ctx.globalCompositeOperation = 'lighter';
+   180→  for (let i = 0; i < dust.length; i++) {
+   181→    const d = dust[i];
+   182→    if (d.alpha <= 0.01) continue;
+   183→    const r = d.radius * (d.absorbed ? (1 - d.absorbProgress * 0.5) : 1);
+   184→    // soft glow
+   185→    ctx.beginPath();
+   186→    ctx.arc(d.x, d.y, r * 2.2, 0, Math.PI * 2);
+   187→    ctx.fillStyle = `rgba(180, 200, 255, ${d.alpha * 0.3})`;
+   188→    ctx.fill();
+   189→    // bright core
+   190→    ctx.beginPath();
+   191→    ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+   192→    ctx.fillStyle = `rgba(220, 230, 255, ${d.alpha})`;
+   193→    ctx.fill();
+   194→  }
+   195→  ctx.restore();
+   196→}
+   197→
+   198→export function renderGravityBeams(ctx: CanvasRenderingContext2D, beams: { x1: number; y1: number; x2: number; y2: number; life: number; maxLife: number }[]) {
+   199→  // Purple animated energy beams from the boss to enemies.
+   200→  // Multiple layers for a volumetric look.
+   201→  const TAU = Math.PI * 2;
+   202→  const time = Date.now();
+   203→
+   204→  ctx.save();
+   205→  ctx.globalCompositeOperation = 'lighter';
+   206→
+   207→  for (let i = 0; i < beams.length; i++) {
+   208→    const beam = beams[i];
+   209→    const alpha = beam.life / beam.maxLife;
+   210→    const dx = beam.x2 - beam.x1;
+   211→    const dy = beam.y2 - beam.y1;
+   212→    const len = Math.sqrt(dx * dx + dy * dy);
+   213→    if (len < 1) continue;
+   214→    const angle = Math.atan2(dy, dx);
+   215→
+   216→    ctx.save();
+   217→    ctx.translate(beam.x1, beam.y1);
+   218→    ctx.rotate(angle);
+   219→
+   220→    // Layer 1: Wide outer glow
+   221→    ctx.beginPath();
+   222→    ctx.moveTo(0, 0);
+   223→    ctx.lineTo(len, 0);
+   224→    ctx.strokeStyle = `rgba(191, 0, 255, ${alpha * 0.15})`;
+   225→    ctx.lineWidth = 16;
+   226→    ctx.lineCap = 'round';
+   227→    ctx.stroke();
+   228→
+   229→    // Layer 2: Mid beam
+   230→    ctx.beginPath();
+   231→    ctx.moveTo(0, 0);
+   232→    ctx.lineTo(len, 0);
+   233→    ctx.strokeStyle = `rgba(191, 0, 255, ${alpha * 0.4})`;
+   234→    ctx.lineWidth = 6;
+   235→    ctx.stroke();
+   236→
+   237→    // Layer 3: Animated energy pulses traveling along the beam
+   238→    const pulseCount = Math.max(2, Math.floor(len / 40));
+   239→    for (let p = 0; p < pulseCount; p++) {
+   240→      const phase = ((time / 200) + p / pulseCount) % 1;
+   241→      const px = phase * len;
+   242→      const pulseR = 4 + Math.sin(time / 100 + p) * 2;
+   243→      // glow
+   244→      ctx.beginPath();
+   245→      ctx.arc(px, 0, pulseR * 2, 0, TAU);
+   246→      ctx.fillStyle = `rgba(191, 0, 255, ${alpha * 0.3})`;
+   247→      ctx.fill();
+   248→      // core
+   249→      ctx.beginPath();
+   250→      ctx.arc(px, 0, pulseR, 0, TAU);
+   251→      ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.8})`;
+   252→      ctx.fill();
+   253→    }
+   254→
+   255→    // Layer 4: Bright core line
+   256→    ctx.beginPath();
+   257→    ctx.moveTo(0, 0);
+   258→    ctx.lineTo(len, 0);
+   259→    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+   260→    ctx.lineWidth = 1.5;
+   261→    ctx.stroke();
+   262→
+   263→    ctx.restore();
+   264→  }
+   265→
+   266→  ctx.restore();
+   267→}
+   268→
+   269→export function renderMiniBlackHoles(ctx: CanvasRenderingContext2D, blackHoles: { x: number; y: number; radius: number; absorbRadius: number; life: number; maxLife: number; angle: number }[]) {
+   270→  // Redesigned mini black holes — detailed black-white-purple cosmic voids.
+   271→  // No rotating rings (unlike the boss) — instead: swirling particle streams,
+   272→  // pulsing event horizon, energy tendrils, and a shimmering accretion disk.
+   273→  const TAU = Math.PI * 2;
+   274→  const time = Date.now();
+   275→
+   276→  for (let i = 0; i < blackHoles.length; i++) {
+   277→    const bh = blackHoles[i];
+   278→    const r = bh.radius;
+   279→
+   280→    // Fade in/out
+   281→    let alpha = 1;
+   282→    if (bh.life < 60) alpha = bh.life / 60;
+   283→    if (bh.life > bh.maxLife - 30) alpha = (bh.maxLife - bh.life) / 30;
+   284→
+   285→    // Pulsing factor — subtle breathing
+   286→    const pulse = 1 + Math.sin(time / 300 + i) * 0.06;
+   287→
+   288→    ctx.save();
+   289→    ctx.translate(bh.x, bh.y);
+   290→
+   291→    // === Layer 0: Outer absorb field — swirling distortion ===
+   292→    ctx.save();
+   293→    ctx.globalCompositeOperation = 'lighter';
+   294→    const fieldR = bh.absorbRadius * pulse;
+   295→    const fieldGrad = ctx.createRadialGradient(0, 0, r * 0.8, 0, 0, fieldR);
+   296→    fieldGrad.addColorStop(0, `rgba(120, 40, 180, ${alpha * 0.18})`);
+   297→    fieldGrad.addColorStop(0.4, `rgba(80, 20, 120, ${alpha * 0.08})`);
+   298→    fieldGrad.addColorStop(1, 'rgba(0,0,0,0)');
+   299→    ctx.beginPath();
+   300→    ctx.arc(0, 0, fieldR, 0, TAU);
+   301→    ctx.fillStyle = fieldGrad;
+   302→    ctx.fill();
+   303→    ctx.restore();
+   304→
+   305→    // === Layer 1: Swirling particle stream — dots spiraling inward ===
+   306→    ctx.save();
+   307→    ctx.globalCompositeOperation = 'lighter';
+   308→    ctx.rotate(bh.angle * 0.5);
+   309→    const particleCount = 14;
+   310→    for (let p = 0; p < particleCount; p++) {
+   311→      const spiralAngle = bh.angle * 2 + (TAU / particleCount) * p;
+   312→      const spiralT = (p / particleCount + Math.sin(time / 400 + p) * 0.05) % 1;
+   313→      const spiralR = r * 1.0 + (bh.absorbRadius - r) * (1 - spiralT);
+   314→      const sx = Math.cos(spiralAngle) * spiralR;
+   315→      const sy = Math.sin(spiralAngle) * spiralR;
+   316→      const pAlpha = alpha * spiralT * 0.6;
+   317→      const pSize = 1 + spiralT * 2;
+   318→      // glow
+   319→      ctx.beginPath();
+   320→      ctx.arc(sx, sy, pSize * 2, 0, TAU);
+   321→      ctx.fillStyle = `rgba(180, 120, 255, ${pAlpha * 0.3})`;
+   322→      ctx.fill();
+   323→      // core
+   324→      ctx.beginPath();
+   325→      ctx.arc(sx, sy, pSize, 0, TAU);
+   326→      ctx.fillStyle = `rgba(220, 200, 255, ${pAlpha})`;
+   327→      ctx.fill();
+   328→    }
+   329→    ctx.restore();
+   330→
+   331→    // === Layer 2: Energy tendrils — short jagged arcs around the void ===
+   332→    ctx.save();
+   333→    ctx.globalCompositeOperation = 'lighter';
+   334→    ctx.rotate(-bh.angle * 1.5);
+   335→    const tendrilCount = 5;
+   336→    for (let t = 0; t < tendrilCount; t++) {
+   337→      const baseAngle = (TAU / tendrilCount) * t + Math.sin(time / 250 + t) * 0.2;
+   338→      const tendrilLen = 0.6 + Math.sin(time / 180 + t * 1.5) * 0.15;
+   339→      ctx.beginPath();
+   340→      ctx.arc(0, 0, r * 1.3, baseAngle, baseAngle + tendrilLen);
+   341→      ctx.strokeStyle = `rgba(160, 100, 220, ${alpha * 0.45})`;
+   342→      ctx.lineWidth = 3;
+   343→      ctx.lineCap = 'round';
+   344→      ctx.stroke();
+   345→      // bright inner edge
+   346→      ctx.beginPath();
+   347→      ctx.arc(0, 0, r * 1.3, baseAngle, baseAngle + tendrilLen * 0.6);
+   348→      ctx.strokeStyle = `rgba(255, 240, 255, ${alpha * 0.3})`;
+   349→      ctx.lineWidth = 1;
+   350→      ctx.stroke();
+   351→    }
+   352→    ctx.restore();
+   353→
+   354→    // === Layer 3: Accretion disk — flat elliptical band with gradient ===
+   355→    ctx.save();
+   356→    ctx.rotate(bh.angle * 0.8);
+   357→    ctx.scale(1, 0.25);
+   358→    ctx.beginPath();
+   359→    ctx.arc(0, 0, r * 2.0 * pulse, 0, TAU);
+   360→    const diskGrad = ctx.createRadialGradient(0, 0, r * 0.8, 0, 0, r * 2.0);
+   361→    diskGrad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.0})`);
+   362→    diskGrad.addColorStop(0.3, `rgba(200, 150, 255, ${alpha * 0.4})`);
+   363→    diskGrad.addColorStop(0.6, `rgba(120, 60, 180, ${alpha * 0.3})`);
+   364→    diskGrad.addColorStop(1, 'rgba(0,0,0,0)');
+   365→    ctx.strokeStyle = diskGrad;
+   366→    ctx.lineWidth = 6;
+   367→    ctx.stroke();
+   368→    ctx.restore();
+   369→
+   370→    // === Layer 4: Event horizon — dark void with layered gradient ===
+   371→    ctx.beginPath();
+   372→    ctx.arc(0, 0, r * pulse, 0, TAU);
+   373→    const voidGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, r * pulse);
+   374→    voidGrad.addColorStop(0, '#000000');
+   375→    voidGrad.addColorStop(0.5, '#000000');
+   376→    voidGrad.addColorStop(0.75, `rgba(30, 0, 40, ${alpha})`);
+   377→    voidGrad.addColorStop(0.9, `rgba(80, 20, 100, ${alpha})`);
+   378→    voidGrad.addColorStop(0.97, `rgba(180, 100, 220, ${alpha * 0.6})`);
+   379→    voidGrad.addColorStop(1, `rgba(200, 150, 255, ${alpha * 0.2})`);
+   380→    ctx.fillStyle = voidGrad;
+   381→    ctx.fill();
+   382→
+   383→    // === Layer 5: Photon ring — thin bright ring at the edge of the void ===
+   384→    ctx.beginPath();
+   385→    ctx.arc(0, 0, r * 0.95 * pulse, 0, TAU);
+   386→    ctx.strokeStyle = `rgba(255, 240, 255, ${alpha * 0.5})`;
+   387→    ctx.lineWidth = 1;
+   388→    ctx.stroke();
+   389→
+   390→    // === Layer 6: Pulsing inner core — small bright dot that flickers ===
+   391→    const coreFlicker = 0.6 + Math.sin(time / 80 + i * 2) * 0.3;
+   392→    ctx.save();
+   393→    ctx.globalCompositeOperation = 'lighter';
+   394→    ctx.beginPath();
+   395→    ctx.arc(0, 0, r * 0.3 * pulse, 0, TAU);
+   396→    const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.3);
+   397→    coreGrad.addColorStop(0, `rgba(255, 255, 255, ${alpha * coreFlicker})`);
+   398→    coreGrad.addColorStop(0.5, `rgba(200, 150, 255, ${alpha * coreFlicker * 0.5})`);
+   399→    coreGrad.addColorStop(1, 'rgba(0,0,0,0)');
+   400→    ctx.fillStyle = coreGrad;
+   401→    ctx.fill();
+   402→    ctx.restore();
+   403→
+   404→    // === Layer 7: Inner pure black singularity ===
+   405→    ctx.beginPath();
+   406→    ctx.arc(0, 0, r * 0.25 * pulse, 0, TAU);
+   407→    ctx.fillStyle = '#000000';
+   408→    ctx.fill();
+   409→
+   410→    // === Layer 8: Spawn/despawn flash ===
+   411→    if (bh.life > bh.maxLife - 20) {
+   412→      const flashAlpha = (bh.maxLife - bh.life) / 20;
+   413→      ctx.save();
+   414→      ctx.globalCompositeOperation = 'lighter';
+   415→      ctx.beginPath();
+   416→      ctx.arc(0, 0, r * 2.5 * (1 - flashAlpha), 0, TAU);
+   417→      ctx.strokeStyle = `rgba(200, 150, 255, ${flashAlpha * 0.6})`;
+   418→      ctx.lineWidth = 3;
+   419→      ctx.stroke();
+   420→      ctx.restore();
+   421→    }
+   422→
+   423→    ctx.restore();
+   424→  }
+   425→}
+   426→
+   427→export function renderProjectiles(ctx: CanvasRenderingContext2D, projectiles: Projectile[]) {
+   428→  projectiles.forEach(p => {
+   429→    // Magnet arrows use a magenta/purple palette, crit arrows use orange, regular use cyan
+   430→    const isMagnet = p.isMagnet;
+   431→    const baseR = isMagnet ? 255 : (p.isCrit ? 255 : 0);
+   432→    const baseG = isMagnet ? 0 : (p.isCrit ? 170 : 255);
+   433→    const baseB = isMagnet ? 255 : (p.isCrit ? 0 : 255);
+   434→
+   435→    // Draw trail
+   436→    if (p.trail) {
+   437→      p.trail.forEach((t, ti) => {
+   438→        const alpha = (ti / p.trail.length) * 0.6;
+   439→        const r = p.radius * (ti / p.trail.length) * (isMagnet ? 1.1 : 0.8);
+   440→        ctx.beginPath();
+   441→        ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+   442→        ctx.fillStyle = `rgba(${baseR}, ${baseG}, ${baseB}, ${alpha})`;
+   443→        ctx.fill();
+   444→        // Magnet trail gets an extra white-hot core
+   445→        if (isMagnet) {
+   446→          ctx.beginPath();
+   447→          ctx.arc(t.x, t.y, r * 0.4, 0, Math.PI * 2);
+   448→          ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.7})`;
+   449→          ctx.fill();
+   450→        }
+   451→      });
+   452→    }
+   453→
+   454→    // Magnet aura — pulsing magnetic field rings around the arrow (un-rotated)
+   455→    if (isMagnet) {
+   456→      const pulseT = Date.now() / 120;
+   457→      for (let ring = 0; ring < 3; ring++) {
+   458→        const phase = (pulseT + ring * 1.2) % 3;
+   459→        const ringR = 8 + phase * 10;
+   460→        const ringAlpha = Math.max(0, 0.5 - phase / 6);
+   461→        ctx.beginPath();
+   462→        ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
+   463→        ctx.strokeStyle = `rgba(255, 0, 255, ${ringAlpha})`;
+   464→        ctx.lineWidth = 2;
+   465→        ctx.stroke();
+   466→      }
+   467→      // Soft outer halo
+   468→      const haloGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 22);
+   469→      haloGrad.addColorStop(0, 'rgba(255, 0, 255, 0.35)');
+   470→      haloGrad.addColorStop(0.5, 'rgba(191, 0, 255, 0.15)');
+   471→      haloGrad.addColorStop(1, 'rgba(191, 0, 255, 0)');
+   472→      ctx.beginPath();
+   473→      ctx.arc(p.x, p.y, 22, 0, Math.PI * 2);
+   474→      ctx.fillStyle = haloGrad;
+   475→      ctx.fill();
+   476→    }
+   477→
+   478→    ctx.save();
+   479→    ctx.translate(p.x, p.y);
+   480→    ctx.rotate(Math.atan2(p.vy, p.vx));
+   481→
+   482→    const arrowLen = 30;
+   483→
+   484→    const glowColor = `rgba(${baseR}, ${baseG}, ${baseB}, ${isMagnet ? 0.7 : 0.5})`;
+   485→    const shadowColor = isMagnet ? '#ff00ff' : (p.isCrit ? '#ffaa00' : '#00ffff');
+   486→    const fillHeadEnd = isMagnet ? '#660066' : (p.isCrit ? '#aa5500' : '#005555');
+   487→    const fletchColor = `rgba(${baseR}, ${baseG}, ${baseB}, 0.9)`;
+   488→
+   489→    // Arrow shaft glow (thicker for magnet)
+   490→    ctx.beginPath();
+   491→    ctx.moveTo(-25, 0);
+   492→    ctx.lineTo(arrowLen, 0);
+   493→    ctx.strokeStyle = `rgba(${baseR}, ${baseG}, ${baseB}, ${isMagnet ? 0.3 : 0.2})`;
+   494→    ctx.lineWidth = isMagnet ? 16 : 12;
+   495→    ctx.stroke();
+   496→
+   497→    ctx.beginPath();
+   498→    ctx.moveTo(-25, 0);
+   499→    ctx.lineTo(arrowLen, 0);
+   500→    ctx.strokeStyle = glowColor;
+   501→    ctx.lineWidth = isMagnet ? 5 : 4;
+   502→    ctx.stroke();
+   503→
+   504→    // Arrow shaft core
+   505→    ctx.beginPath();
+   506→    ctx.moveTo(-25, 0);
+   507→    ctx.lineTo(arrowLen, 0);
+   508→    ctx.strokeStyle = '#ffffff';
+   509→    ctx.lineWidth = 2;
+   510→    ctx.stroke();
+   511→
+   512→    // High-tech Arrow head
+   513→    ctx.beginPath();
+   514→    ctx.moveTo(arrowLen + 8, 0);
+   515→    ctx.lineTo(arrowLen - 6, -6);
+   516→    ctx.lineTo(arrowLen - 2, 0);
+   517→    ctx.lineTo(arrowLen - 6, 6);
+   518→    ctx.closePath();
+   519→    const headGrad = ctx.createLinearGradient(arrowLen - 6, -6, arrowLen + 8, 8);
+   520→    headGrad.addColorStop(0, '#ffffff');
+   521→    headGrad.addColorStop(0.4, shadowColor);
+   522→    headGrad.addColorStop(1, fillHeadEnd);
+   523→    ctx.fillStyle = headGrad;
+   524→    ctx.fill();
+   525→
+   526→    // Arrow fletching (Energy fins)
+   527→    ctx.beginPath();
+   528→    ctx.moveTo(-25, 0);
+   529→    ctx.lineTo(-33, -6);
+   530→    ctx.lineTo(-28, 0);
+   531→    ctx.lineTo(-33, 6);
+   532→    ctx.closePath();
+   533→    ctx.fillStyle = fletchColor;
+   534→    ctx.fill();
+   535→
+   536→    // Extra energy rings around the arrow
+   537→    ctx.beginPath();
+   538→    ctx.ellipse(0, 0, 3, 9, 0, 0, Math.PI * 2);
+   539→    ctx.strokeStyle = glowColor;
+   540→    ctx.lineWidth = isMagnet ? 2 : 1.5;
+   541→    ctx.stroke();
+   542→
+   543→    // Magnet arrows get an extra small magnet icon glow at the tip
+   544→    if (isMagnet) {
+   545→      ctx.beginPath();
+   546→      ctx.arc(arrowLen + 4, 0, 5, 0, Math.PI * 2);
+   547→      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+   548→      ctx.fill();
+   549→      ctx.beginPath();
+   550→      ctx.arc(arrowLen + 4, 0, 8, 0, Math.PI * 2);
+   551→      ctx.strokeStyle = 'rgba(255, 0, 255, 0.6)';
+   552→      ctx.lineWidth = 1.5;
+   553→      ctx.stroke();
+   554→    }
+   555→
+   556→    ctx.restore();
+   557→  });
+   558→}
+   559→
+   560→export function renderEnemies(
+   561→  ctx: CanvasRenderingContext2D,
+   562→  enemies: Enemy[],
+   563→  opts?: { bossName?: string; bossDanger?: string },
+   564→) {
+   565→  enemies.forEach(e => {
+   566→    const isGhost = e.id === 'ghost';
+   567→    const isPhantom = e.id === 'phantom';
+   568→    const hasAlpha = isGhost || isPhantom;
+   569→    const alpha = hasAlpha ? (e.teleportAlpha ?? 1) : 1;
+   570→    const ringAnim = e.teleportRingAnim ?? 0;
+   571→
+   572→    // Анимация появления после телепортации: расширяющееся кольцо (рисуем до globalAlpha)
+   573→    if (isGhost && ringAnim > 0) {
+   574→      const ringProgress = 1 - ringAnim / 30;
+   575→      const ringRadius = e.radius + ringProgress * e.radius * 2.5;
+   576→      const ringAlpha = ringAnim / 30;
+   577→      ctx.globalAlpha = ringAlpha;
+   578→      // Внешнее кольцо
+   579→      ctx.beginPath();
+   580→      ctx.arc(e.x, e.y, ringRadius, 0, Math.PI * 2);
+   581→      ctx.strokeStyle = e.color + '44';
+   582→      ctx.lineWidth = 15 * ringAlpha;
+   583→      ctx.stroke();
+   584→      ctx.strokeStyle = e.color;
+   585→      ctx.lineWidth = 3 * ringAlpha;
+   586→      ctx.stroke();
+   587→      // Второе кольцо чуть меньше
+   588→      ctx.beginPath();
+   589→      ctx.arc(e.x, e.y, ringRadius * 0.65, 0, Math.PI * 2);
+   590→      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+   591→      ctx.lineWidth = 8 * ringAlpha;
+   592→      ctx.stroke();
+   593→      ctx.strokeStyle = '#ffffff';
+   594→      ctx.lineWidth = 1.5 * ringAlpha;
+   595→      ctx.stroke();
+   596→    }
+   597→
+   598→    ctx.globalAlpha = alpha;
+   599→
+   600→    // Draw Enemy Trail
+   601→    if (e.trail && e.trail.length > 1) {
+   602→      ctx.save();
+   603→      for (let i = 0; i < e.trail.length - 1; i++) {
+   604→        const p1 = e.trail[i];
+   605→        const p2 = e.trail[i+1];
+   606→        const progress = (i + 1) / e.trail.length; // 0 to 1
+   607→        
+   608→        ctx.beginPath();
+   609→        ctx.moveTo(p1.x, p1.y);
+   610→        ctx.lineTo(p2.x, p2.y);
+   611→        
+   612→        ctx.strokeStyle = e.color;
+   613→        ctx.globalAlpha = alpha * progress * 0.15;
+   614→        ctx.lineWidth = e.radius * 1.5 * progress;
+   615→        ctx.lineCap = 'round';
+   616→        ctx.stroke();
+   617→        
+   618→        ctx.globalAlpha = alpha * progress * 0.4;
+   619→        ctx.lineWidth = e.radius * 0.8 * progress;
+   620→        ctx.stroke();
+   621→
+   622→        ctx.beginPath();
+   623→        ctx.moveTo(p1.x, p1.y);
+   624→        ctx.lineTo(p2.x, p2.y);
+   625→        ctx.strokeStyle = '#ffffff';
+   626→        ctx.globalAlpha = alpha * progress * 0.2;
+   627→        ctx.lineWidth = e.radius * 0.2 * progress;
+   628→        ctx.lineCap = 'round';
+   629→        ctx.stroke();
+   630→      }
+   631→      
+   632→      // Connection to current enemy position
+   633→      const lastP = e.trail[e.trail.length - 1];
+   634→      ctx.beginPath();
+   635→      ctx.moveTo(lastP.x, lastP.y);
+   636→      ctx.lineTo(e.x, e.y);
+   637→      ctx.strokeStyle = e.color;
+   638→      ctx.globalAlpha = alpha * 0.5;
+   639→      ctx.lineWidth = e.radius * 0.8;
+   640→      ctx.lineCap = 'round';
+   641→      ctx.stroke();
+   642→
+   643→      ctx.beginPath();
+   644→      ctx.moveTo(lastP.x, lastP.y);
+   645→      ctx.lineTo(e.x, e.y);
+   646→      ctx.strokeStyle = '#ffffff';
+   647→      ctx.globalAlpha = alpha * 0.3;
+   648→      ctx.lineWidth = e.radius * 0.2;
+   649→      ctx.lineCap = 'round';
+   650→      ctx.stroke();
+   651→      
+   652→      ctx.restore();
+   653→      ctx.globalAlpha = alpha; // restore
+   654→    }
+   655→
+   656→    // Pulse glow ring
+   657→    ctx.save();
+   658→    ctx.translate(e.x, e.y);
+   659→    // Add dynamic rotation to the pulse ring
+   660→    ctx.rotate((Date.now() / 1000) * (e.id === 'tank' ? 0.5 : 1.5));
+   661→    ctx.beginPath();
+   662→    ctx.arc(0, 0, e.pulseRadius + Math.sin(Date.now() / 150) * 2 + 4, 0, Math.PI * 2);
+   663→    ctx.strokeStyle = e.color + 'aa';
+   664→    ctx.lineWidth = 1.5;
+   665→    ctx.setLineDash([10, 15, 3, 15]);
+   666→    ctx.stroke();
+   667→    // fake pulse glow
+   668→    ctx.strokeStyle = e.color + '44';
+   669→    ctx.lineWidth = 6;
+   670→    ctx.stroke();
+   671→    
+   672→    // Additional inner dashed ring
+   673→    ctx.beginPath();
+   674→    ctx.rotate(-Date.now() / 500);
+   675→    ctx.arc(0, 0, e.radius + 6, 0, Math.PI * 2);
+   676→    ctx.strokeStyle = e.color + '66';
+   677→    ctx.lineWidth = 1;
+   678→    ctx.setLineDash([2, 6]);
+   679→    ctx.stroke();
+   680→    ctx.setLineDash([]);
+   681→    ctx.restore();
+   682→
+   683→    // Fade-in ring (пока появляется после телепорта)
+   684→    if (isGhost && alpha < 1 && !e.teleportFading) {
+   685→      ctx.beginPath();
+   686→      ctx.arc(e.x, e.y, e.radius * (1.5 + (1 - alpha)), 0, Math.PI * 2);
+   687→      ctx.strokeStyle = e.color + '66';
+   688→      ctx.lineWidth = 10;
+   689→      ctx.stroke();
+   690→      ctx.strokeStyle = e.color;
+   691→      ctx.lineWidth = 2;
+   692→      ctx.stroke();
+   693→    }
+   694→
+   695→    // Индикатор оставшихся телепортаций (маленькие точки над врагом)
+   696→    if (isGhost && (e.teleportsLeft ?? 0) > 0 && alpha >= 1) {
+   697→      ctx.globalAlpha = 0.8;
+   698→      const dots = e.teleportsLeft ?? 0;
+   699→      for (let d = 0; d < dots; d++) {
+   700→        const dotX = e.x - (dots - 1) * 5 + d * 10;
+   701→        const dotY = e.y - e.radius - 22;
+   702→        ctx.beginPath();
+   703→        ctx.arc(dotX, dotY, 3, 0, Math.PI * 2);
+   704→        ctx.fillStyle = e.color;
+   705→        ctx.shadowBlur = 8;
+   706→        ctx.shadowColor = e.color;
+   707→        ctx.fill();
+   708→        ctx.shadowBlur = 0;
+   709→      }
+   710→      ctx.globalAlpha = alpha;
+   711→    }
+   712→
+   713→    drawShape(ctx, e.shape, e.x, e.y, e.radius, e.color, e.glowColor, e.angle, e.flashTimer, e.hp, e.maxHp);
+   714→
+   715→    // HP bar -> Curved Arc HP Bar
+   716→    if (e.maxHp > 1 && e.hp < e.maxHp) {
+   717→      const radius = e.radius + 12; // place it just outside the enemy
+   718→      const startAngle = -Math.PI; // Top left
+   719→      const endAngle = 0; // Top right
+   720→      const hpPercentage = Math.max(0, e.hp / e.maxHp);
+   721→      
+   722→      // Calculate the angle for the current HP
+   723→      const currentAngle = startAngle + (endAngle - startAngle) * hpPercentage;
+   724→
+   725→      ctx.save();
+   726→      ctx.translate(e.x, e.y);
+   727→      
+   728→      // Background track
+   729→      ctx.beginPath();
+   730→      ctx.arc(0, 0, radius, startAngle, endAngle);
+   731→      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+   732→      ctx.lineWidth = 3;
+   733→      ctx.lineCap = 'round';
+   734→      ctx.stroke();
+   735→
+   736→      // HP value
+   737→      ctx.beginPath();
+   738→      ctx.arc(0, 0, radius, startAngle, currentAngle);
+   739→      ctx.strokeStyle = e.color + '66';
+   740→      ctx.lineWidth = 9;
+   741→      ctx.lineCap = 'round';
+   742→      ctx.stroke();
+   743→
+   744→      ctx.beginPath();
+   745→      ctx.arc(0, 0, radius, startAngle, currentAngle);
+   746→      ctx.strokeStyle = e.color;
+   747→      ctx.lineWidth = 3;
+   748→      ctx.lineCap = 'round';
+   749→      ctx.stroke();
+   750→      
+   751→      ctx.restore();
+   752→    }
+   753→    
+   754→    // Epic Huge Boss HP
+   755→    if (e.id === 'boss_omega') {
+   756→      const W = ctx.canvas.width;
+   757→      const bw = W * 0.6;
+   758→      const bh = 22;
+   759→      const bx = (W - bw) / 2;
+   760→      const by = 40;
+   761→
+   762→      ctx.save();
+   763→      const hpPercentage = Math.max(0, e.hp / e.maxHp);
+   764→      // Phase: 0 (full) → 2 (near death)
+   765→      const bossPhase = Math.min(2, Math.floor((1 - hpPercentage) * 3));
+   766→      const barColor = bossPhase >= 2 ? '#ff0044' : (bossPhase >= 1 ? '#ff00aa' : e.glowColor);
+   767→
+   768→      // Outer frame glow
+   769→      ctx.shadowBlur = 18;
+   770→      ctx.shadowColor = barColor;
+   771→      ctx.strokeStyle = barColor;
+   772→      ctx.lineWidth = 2;
+   773→      ctx.strokeRect(bx - 2, by - 2, bw + 4, bh + 4);
+   774→
+   775→      // bg track
+   776→      ctx.shadowBlur = 0;
+   777→      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+   778→      ctx.fillRect(bx, by, bw, bh);
+   779→
+   780→      // inner border
+   781→      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+   782→      ctx.lineWidth = 1;
+   783→      ctx.strokeRect(bx, by, bw, bh);
+   784→
+   785→      // HP fill — gradient
+   786→      const fillGrad = ctx.createLinearGradient(bx, by, bx, by + bh);
+   787→      fillGrad.addColorStop(0, '#ffffff');
+   788→      fillGrad.addColorStop(0.3, barColor);
+   789→      fillGrad.addColorStop(1, bossPhase >= 2 ? '#660022' : '#330055');
+   790→      ctx.fillStyle = fillGrad;
+   791→      ctx.shadowBlur = 12;
+   792→      ctx.shadowColor = barColor;
+   793→      ctx.fillRect(bx, by, bw * hpPercentage, bh);
+   794→
+   795→      // Sheen overlay on the filled portion
+   796→      if (hpPercentage > 0) {
+   797→        ctx.shadowBlur = 0;
+   798→        const sheenGrad = ctx.createLinearGradient(bx, by, bx, by + bh);
+   799→        sheenGrad.addColorStop(0, 'rgba(255,255,255,0.4)');
+   800→        sheenGrad.addColorStop(0.5, 'rgba(255,255,255,0.1)');
+   801→        sheenGrad.addColorStop(1, 'rgba(255,255,255,0)');
+   802→        ctx.fillStyle = sheenGrad;
+   803→        ctx.fillRect(bx, by, bw * hpPercentage, bh);
+   804→      }
+   805→
+   806→      // Phase tick marks (33% and 66%)
+   807→      ctx.shadowBlur = 0;
+   808→      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+   809→      ctx.lineWidth = 1;
+   810→      [0.33, 0.66].forEach(t => {
+   811→        const tx = bx + bw * t;
+   812→        ctx.beginPath();
+   813→        ctx.moveTo(tx, by);
+   814→        ctx.lineTo(tx, by + bh);
+   815→        ctx.stroke();
+   816→      });
+   817→
+   818→      // Title with glow
+   819→      ctx.fillStyle = '#ffffff';
+   820→      ctx.font = 'bold 18px Orbitron';
+   821→      ctx.shadowBlur = 8;
+   822→      ctx.shadowColor = barColor;
+   823→      ctx.textAlign = 'center';
+   824→      const bossLabel = (opts?.bossName ?? e.name).toUpperCase() + (bossPhase >= 2 ? ' — ' + (opts?.bossDanger ?? '') : '');
+   825→      ctx.fillText(bossLabel, W / 2, by - 12);
+   826→
+   827→      // HP percentage text
+   828→      ctx.font = 'bold 11px Orbitron';
+   829→      ctx.shadowBlur = 4;
+   830→      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+   831→      ctx.fillText(`${Math.round(hpPercentage * 100)}%`, W / 2, by + bh / 2 + 4);
+   832→
+   833→      ctx.restore();
+   834→    }
+   835→
+   836→    ctx.globalAlpha = 1;
+   837→  });
+   838→}
+   839→
+   840→export function renderBow(
+   841→  ctx: CanvasRenderingContext2D,
+   842→  cx: number,
+   843→  cy: number,
+   844→  mx: number,
+   845→  my: number,
+   846→  s: InternalGameState,
+   847→) {
+   848→  const bowAngle = Math.atan2(my - cy, mx - cx);
+   849→  const pulse = s.bowPulse > 0 ? 1 + s.bowPulse * 0.04 : 1;
+   850→
+   851→  // Invulnerability flicker
+   852→  if (s.invulnTimer > 0 && Math.floor(Date.now() / 50) % 2 === 0) return;
+   853→
+   854→  ctx.save();
+   855→  ctx.translate(cx, cy);
+   856→  ctx.rotate(bowAngle);
+   857→
+   858→  // Bow outer glow ring (multiple layers for volume)
+   859→  ctx.beginPath();
+   860→  ctx.arc(0, 0, 24 * pulse, 0, Math.PI * 2);
+   861→  ctx.strokeStyle = 'rgba(0,255,255,0.15)';
+   862→  ctx.lineWidth = 14;
+   863→  ctx.stroke();
+   864→
+   865→  ctx.beginPath();
+   866→  ctx.arc(0, 0, 22 * pulse, 0, Math.PI * 2);
+   867→  ctx.strokeStyle = 'rgba(0,255,255,0.2)';
+   868→  ctx.lineWidth = 14;
+   869→  ctx.stroke();
+   870→
+   871→  ctx.beginPath();
+   872→  ctx.arc(0, 0, 22 * pulse, 0, Math.PI * 2);
+   873→  ctx.strokeStyle = 'rgba(0,255,255,0.6)';
+   874→  ctx.lineWidth = 4;
+   875→  ctx.stroke();
+   876→
+   877→  // 3D Core Base
+   878→  ctx.beginPath();
+   879→  ctx.arc(0, 0, 18 * pulse, 0, Math.PI * 2);
+   880→  const coreGrad = ctx.createRadialGradient(-5, -5, 0, 0, 0, 18 * pulse);
+   881→  coreGrad.addColorStop(0, '#ffffff');
+   882→  coreGrad.addColorStop(0.3, '#00ffff');
+   883→  coreGrad.addColorStop(0.8, '#005555');
+   884→  coreGrad.addColorStop(1, '#000000');
+   885→  ctx.fillStyle = coreGrad;
+   886→  ctx.fill();
+   887→
+   888→  // Bow body with 3D gradient
+   889→  const bowGrad = ctx.createLinearGradient(0, -22, 0, 22);
+   890→  bowGrad.addColorStop(0, '#00ffff');
+   891→  bowGrad.addColorStop(0.2, '#ffffff');
+   892→  bowGrad.addColorStop(0.5, '#00aaff');
+   893→  bowGrad.addColorStop(0.8, '#ffffff');
+   894→  bowGrad.addColorStop(1, '#00ffff');
+   895→
+   896→  // Mechanical Bow Limbs
+   897→  ctx.beginPath();
+   898→  // Top limb
+   899→  ctx.moveTo(-12 * pulse, -38 * pulse);
+   900→  ctx.lineTo(8 * pulse, -25 * pulse);
+   901→  ctx.lineTo(0, -15 * pulse);
+   902→  // Bottom limb
+   903→  ctx.moveTo(-12 * pulse, 38 * pulse);
+   904→  ctx.lineTo(8 * pulse, 25 * pulse);
+   905→  ctx.lineTo(0, 15 * pulse);
+   906→  
+   907→  ctx.strokeStyle = bowGrad;
+   908→  ctx.lineWidth = 7;
+   909→  ctx.lineCap = 'round';
+   910→  ctx.lineJoin = 'round';
+   911→  ctx.stroke();
+   912→  
+   913→  // Inner mechanical details
+   914→  ctx.beginPath();
+   915→  ctx.moveTo(-8 * pulse, -35 * pulse);
+   916→  ctx.lineTo(5 * pulse, -25 * pulse);
+   917→  ctx.moveTo(-8 * pulse, 35 * pulse);
+   918→  ctx.lineTo(5 * pulse, 25 * pulse);
+   919→  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+   920→  ctx.lineWidth = 2;
+   921→  ctx.stroke();
+   922→
+   923→  // Floating stabilizers
+   924→  const time = Date.now() * 0.005;
+   925→  const stabOffset = Math.sin(time) * 4;
+   926→  ctx.beginPath();
+   927→  ctx.moveTo(-18 * pulse, -45 * pulse + stabOffset);
+   928→  ctx.lineTo(-8 * pulse, -45 * pulse + stabOffset);
+   929→  ctx.moveTo(-18 * pulse, 45 * pulse - stabOffset);
+   930→  ctx.lineTo(-8 * pulse, 45 * pulse - stabOffset);
+   931→  ctx.strokeStyle = '#00ffff';
+   932→  ctx.lineWidth = 3;
+   933→  ctx.lineCap = 'round';
+   934→  ctx.stroke();
+   935→
+   936→  // Specular highlight on the core
+   937→  ctx.beginPath();
+   938→  ctx.ellipse(-6 * pulse, -6 * pulse, 8 * pulse, 4 * pulse, Math.PI / 4, 0, Math.PI * 2);
+   939→  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+   940→  ctx.fill();
+   941→
+   942→  // Bow string (Energy tethers)
+   943→  ctx.beginPath();
+   944→  ctx.moveTo(-12 * pulse, -38 * pulse);
+   945→  ctx.lineTo(15 * pulse, 0);
+   946→  ctx.lineTo(-12 * pulse, 38 * pulse);
+   947→  ctx.strokeStyle = 'rgba(0,255,255,0.6)';
+   948→  ctx.lineWidth = 2;
+   949→  ctx.stroke();
+   950→  
+   951→  ctx.beginPath();
+   952→  ctx.moveTo(-12 * pulse, -38 * pulse);
+   953→  ctx.lineTo(26 * pulse, 0);
+   954→  ctx.lineTo(-12 * pulse, 38 * pulse);
+   955→  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+   956→  ctx.lineWidth = 1;
+   957→  ctx.stroke();
+   958→
+   959→  // Arrow ready with better detail and volume
+   960→  // The last arrow is a magnet arrow (magenta/purple) if the upgrade is purchased
+   961→  if (!s.reloading && s.arrows > 0) {
+   962→    const isLastMagnet = s.magnetArrow > 0 && s.arrows === 1;
+   963→    const aR = isLastMagnet ? 255 : 0;
+   964→    const aG = isLastMagnet ? 0 : 255;
+   965→    const aB = isLastMagnet ? 255 : 255;
+   966→    const arrowLen = 42 * pulse;
+   967→
+   968→    // Magnet aura around the nocked arrow
+   969→    if (isLastMagnet) {
+   970→      const pulseT = Date.now() / 150;
+   971→      for (let ring = 0; ring < 2; ring++) {
+   972→        const phase = (pulseT + ring * 1.3) % 2.6;
+   973→        const ringR = 14 + phase * 12;
+   974→        const ringAlpha = Math.max(0, 0.45 - phase / 5.5);
+   975→        ctx.beginPath();
+   976→        ctx.arc(arrowLen * 0.4, 0, ringR, 0, Math.PI * 2);
+   977→        ctx.strokeStyle = `rgba(255, 0, 255, ${ringAlpha})`;
+   978→        ctx.lineWidth = 2;
+   979→        ctx.stroke();
+   980→      }
+   981→    }
+   982→
+   983→    // Arrow shaft glow
+   984→    ctx.beginPath();
+   985→    ctx.moveTo(-15, 0);
+   986→    ctx.lineTo(arrowLen, 0);
+   987→    ctx.strokeStyle = `rgba(${aR}, ${aG}, ${aB}, ${isLastMagnet ? 0.3 : 0.2})`;
+   988→    ctx.lineWidth = isLastMagnet ? 14 : 12;
+   989→    ctx.stroke();
+   990→
+   991→    ctx.beginPath();
+   992→    ctx.moveTo(-15, 0);
+   993→    ctx.lineTo(arrowLen, 0);
+   994→    ctx.strokeStyle = `rgba(${aR}, ${aG}, ${aB}, ${isLastMagnet ? 0.75 : 0.6})`;
+   995→    ctx.lineWidth = isLastMagnet ? 5 : 4;
+   996→    ctx.stroke();
+   997→
+   998→    // Arrow shaft core
+   999→    ctx.beginPath();
+  1000→    ctx.moveTo(-15, 0);
+  1001→    ctx.lineTo(arrowLen, 0);
+  1002→    ctx.strokeStyle = '#ffffff';
+  1003→    ctx.lineWidth = 2;
+  1004→    ctx.shadowBlur = 0;
+  1005→    ctx.stroke();
+  1006→
+  1007→    // High-tech Arrow head (3D)
+  1008→    ctx.beginPath();
+  1009→    ctx.moveTo(arrowLen + 8, 0);
+  1010→    ctx.lineTo(arrowLen - 6, -8);
+  1011→    ctx.lineTo(arrowLen - 2, 0);
+  1012→    ctx.lineTo(arrowLen - 6, 8);
+  1013→    ctx.closePath();
+  1014→    const headGrad = ctx.createLinearGradient(arrowLen - 6, -8, arrowLen + 8, 8);
+  1015→    headGrad.addColorStop(0, '#ffffff');
+  1016→    headGrad.addColorStop(0.4, isLastMagnet ? '#ff00ff' : '#00ffff');
+  1017→    headGrad.addColorStop(1, isLastMagnet ? '#660066' : '#005555');
+  1018→    ctx.fillStyle = headGrad;
+  1019→    ctx.fill();
+  1020→
+  1021→    // Arrow fletching (Energy fins)
+  1022→    ctx.beginPath();
+  1023→    ctx.moveTo(-15, 0);
+  1024→    ctx.lineTo(-25, -8);
+  1025→    ctx.lineTo(-18, 0);
+  1026→    ctx.lineTo(-25, 8);
+  1027→    ctx.closePath();
+  1028→    ctx.fillStyle = `rgba(${aR}, ${aG}, ${aB}, 0.9)`;
+  1029→    ctx.fill();
+  1030→
+  1031→    // Extra energy rings around the arrow
+  1032→    ctx.beginPath();
+  1033→    ctx.ellipse(0, 0, 4, 12, 0, 0, Math.PI * 2);
+  1034→    ctx.strokeStyle = `rgba(${aR}, ${aG}, ${aB}, ${isLastMagnet ? 0.9 : 0.8})`;
+  1035→    ctx.lineWidth = isLastMagnet ? 2 : 1.5;
+  1036→    ctx.stroke();
+  1037→  }
+  1038→
+  1039→  ctx.restore();
+  1040→}
+  1041→
+  1042→export function renderAim(
+  1043→  ctx: CanvasRenderingContext2D,
+  1044→  cx: number,
+  1045→  cy: number,
+  1046→  mx: number,
+  1047→  my: number,
+  1048→) {
+  1049→  // Aim line
+  1050→  ctx.beginPath();
+  1051→  ctx.moveTo(cx, cy);
+  1052→  ctx.lineTo(mx, my);
+  1053→  ctx.strokeStyle = 'rgba(0,255,255,0.12)';
+  1054→  ctx.lineWidth = 1;
+  1055→  ctx.setLineDash([6, 8]);
+  1056→  ctx.stroke();
+  1057→  ctx.setLineDash([]);
+  1058→
+  1059→  // Crosshair
+  1060→  const chSize = 10;
+  1061→  ctx.strokeStyle = 'rgba(0,255,255,0.3)';
+  1062→  ctx.lineWidth = 4;
+  1063→  ctx.beginPath();
+  1064→  ctx.moveTo(mx - chSize, my); ctx.lineTo(mx + chSize, my);
+  1065→  ctx.moveTo(mx, my - chSize); ctx.lineTo(mx, my + chSize);
+  1066→  ctx.stroke();
+  1067→  ctx.beginPath();
+  1068→  ctx.arc(mx, my, 5, 0, Math.PI * 2);
+  1069→  ctx.stroke();
+  1070→
+  1071→  ctx.strokeStyle = 'rgba(0,255,255,0.8)';
+  1072→  ctx.lineWidth = 1.5;
+  1073→  ctx.beginPath();
+  1074→  ctx.moveTo(mx - chSize, my); ctx.lineTo(mx + chSize, my);
+  1075→  ctx.moveTo(mx, my - chSize); ctx.lineTo(mx, my + chSize);
+  1076→  ctx.stroke();
+  1077→  ctx.beginPath();
+  1078→  ctx.arc(mx, my, 5, 0, Math.PI * 2);
+  1079→  ctx.stroke();
+  1080→}
+  1081→
+  1082→export function renderReload(
+  1083→  ctx: CanvasRenderingContext2D,
+  1084→  cx: number,
+  1085→  cy: number,
+  1086→  reloadProgress: number,
+  1087→  label?: string,
+  1088→) {
+  1089→  ctx.beginPath();
+  1090→  ctx.arc(cx, cy, 35, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * reloadProgress);
+  1091→  ctx.strokeStyle = 'rgba(0,255,255,0.3)';
+  1092→  ctx.lineWidth = 8;
+  1093→  ctx.stroke();
+  1094→
+  1095→  ctx.beginPath();
+  1096→  ctx.arc(cx, cy, 35, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * reloadProgress);
+  1097→  ctx.strokeStyle = '#00ffff';
+  1098→  ctx.lineWidth = 3;
+  1099→  ctx.stroke();
+  1100→
+  1101→  ctx.fillStyle = 'rgba(0,255,255,0.9)';
+  1102→  ctx.font = 'bold 11px Orbitron, monospace';
+  1103→  ctx.textAlign = 'center';
+  1104→  ctx.fillText(label ?? 'RELOAD', cx, cy + 55);
+  1105→}

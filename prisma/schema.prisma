@@ -1,0 +1,41 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  role         String   @default("user") // "user" | "admin"
+  cores        Int      @default(0)
+  // Upgrades stored as JSON: { baseNode, damage, maxArrows, ... magnetArrow, shockwave, doubleCores }
+  upgrades     String   @default("{\"baseNode\":0,\"damage\":0,\"maxArrows\":0,\"reloadSpeed\":0,\"maxHp\":0,\"regenSpeed\":0,\"coreBonus\":0,\"piercing\":0,\"projectileSpeed\":0,\"critChance\":0,\"critDamage\":0,\"defense\":0,\"magnetArrow\":0,\"shockwave\":0,\"doubleCores\":0}")
+  // Stats stored as JSON: { highScore, maxWave, gamesPlayed, totalEnemiesKilled }
+  stats        String   @default("{\"highScore\":0,\"maxWave\":1,\"gamesPlayed\":0,\"totalEnemiesKilled\":0}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  leaderboardEntries LeaderboardEntry[]
+}
+
+model LeaderboardEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  score     Int
+  wave      Int
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([score(sort: Desc)])
+}

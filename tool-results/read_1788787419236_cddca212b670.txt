@@ -1,0 +1,240 @@
+   360→- Read /home/z/my-project/src/i18n/fr.ts (existing 324-key French translation) to study established terminology and style (PV for HP, noyaux cosmiques, carquois, rechargement, perforation, chance/dégâts critiques, armure, régénération, onde de choc, aimant, éventail, sauf les boss).
+   361→- Read /home/z/my-project/src/i18n/en.ts to cross-check English reference meanings (note: en.ts not yet updated with the 68 new keys, so relied on ru.ts as source of truth per task spec).
+   362→- Performed 6 atomic Edit operations on fr.ts, inserting new keys immediately after the corresponding `doubleCores` (or `cat.economy`/`value.chanceX2`) entries — same insertion point convention as ru.ts:
+   363→  1. NEW upgrade names (15) — after `upgrades.name.doubleCores`
+   364→  2. NEW upgrade descriptions (15) — after `upgrades.desc.doubleCores`
+   365→  3. NEW elite category (1) — after `upgrades.cat.economy`
+   366→  4. NEW stat names (15) — after `upgrades.stat.doubleCores`
+   367→  5. NEW stat descriptions (15) — after `upgrades.statdesc.doubleCores`
+   368→  6. NEW value labels (7) — after `upgrades.value.chanceX2`
+   369→- Verified via ripgrep-equivalent Python regex that the 68 new keys in fr.ts match ru.ts exactly (zero missing/extra) AND full 392-key parity with ru.ts (zero missing/extra) — i.e. fr.ts went from 324 → 392 keys.
+   370→- Translated all values into natural French following established fr.ts conventions:
+   371→  * Percentages use French typography (space before %, e.g. '+5 % par niveau') matching existing fr.ts lines 150-160.
+   372→  * Decimal numbers use French comma separator (×1,5 and ×0,75) consistent with French locale; × symbol preserved verbatim.
+   373→  * Time durations abbreviated with 's' and space (e.g. '2,5 s', 'toutes les 12 s') matching French typographic convention.
+   374→  * 'N-ième' used for the Russian 'N-й' ordinal placeholder.
+   375→  * Apostrophes in single-quoted TypeScript strings escaped as `\'` (consistent with existing fr.ts style, e.g. `l\'ennemi`, `d\'absorption`, `d\'obtenir`, `d\'invulnérabilité`, `d\'un`).
+   376→  * Stat descriptions kept to 4–6 word terse forms (per task spec) — e.g. 'Tirs supplémentaires en éventail', 'Critiques tuent les ennemis affaiblis', 'Noyau bonus par ennemi tué'.
+   377→  * Stat names mirror upgrade names except `critLethal` → 'Crit. Létale' (short form mirroring RU's 'Смерт. крит').
+   378→  * Value labels per task spec: bounces='rebonds', shots='tirs', hp='HP' (preserved verbatim per worklog Task 8 directive), charges='charges', slowmo='ralenti', revive='renaissance', arrowRain='pluie'.
+   379→  * Upgrade names: ricochet='Ricochet' (collides with enemy.bouncer.name 'Ricochet' — same French word, different keys, no conflict), multishot='Salve', overcharge='Surcharge', executioner='Bourreau', critLethal='Critique Létale', critLeech='Vol de Vie Crit.', thorns='Épines', shieldBattery='Batterie de Bouclier', lastStand='Dernier Rempart', coreMagnet='Aimant à Noyaux', scoreBoost='Bonus de Points', jackpot='Jackpot', timeWarp='Distorsion Temporelle', phoenix='Phénix', arrowStorm='Pluie de Flèches'.
+   380→  * Description for `thorns` preserves the bare `%` placeholder token verbatim (matching RU source `'Отражает % полученного урона...'`) — runtime is expected to prepend the numeric percentage.
+   381→- Ran `npx tsc --noEmit src/i18n/fr.ts src/i18n/types.ts` → exit 0, no errors, no output (clean compile).
+   382→
+   383→Stage Summary:
+   384→- Artifact: /home/z/my-project/src/i18n/fr.ts (392 keys, ~450 lines incl. comments) — full French translation now includes all 15 new unique upgrades + elite category.
+   385→- Key count added: 68 (15 name + 15 desc + 1 cat + 15 stat + 15 statdesc + 7 value).
+   386→- Terminology decisions: arc=arc, flèche(s), ennemi(s), vague, PV (points de vie), noyaux cosmiques, amélioration, carquois, rechargement, perforation, (chance/dégâts) critiques, armure (défense), régénération, onde de choc, aimant — all consistent with prior Task 7-e work; preserved Boss Omega='Omega'.
+   387→- All `×`, `−` (U+2212), `%`, `—` symbols preserved verbatim; no new emojis introduced in this batch (upgrade names are plain text without emojis); no runtime placeholders (`{...}`) introduced in this batch.
+   388→- TypeScript compiles cleanly; key parity with ru.ts verified at full-file (392/392) and new-keys-only (68/68) granularity.
+   389→- Only fr.ts modified; ru.ts/en.ts/zh.ts/es.ts/ar.ts/de.ts untouched per task constraints.
+   390→
+   391→---
+   392→Task ID: 8-de
+   393→Agent: general-purpose (German translator)
+   394→Task: Add 68 new upgrade i18n keys to de.ts
+   395→
+   396→Work Log:
+   397→- Read /home/z/my-project/worklog.md to understand prior i18n infrastructure (Tasks 0, 7-a/7-b/7-c/7-d/7-e, 8) and the 68 new keys required (15 names + 15 descs + 1 cat + 15 stats + 15 statdescs + 7 value labels).
+   398→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, 68 new keys marked with `// ===== NEW ... =====` section headers) — focus on the 6 new sections inserted after doubleCores/chanceX2/cat.economy.
+   399→- Read /home/z/my-project/src/i18n/de.ts (existing German translation, 324 keys) to learn established terminology: Bogen/Pfeil/Gegner/Welle/HP/Kerne/Upgrade/Boss/Köcher/Nachladen/Durchschlag/Krit./Rüstung/Regeneration/Schockwelle/Magnet, German quotation marks „…", dot thousands separator (1.000), no space before %.
+   400→- Read /home/z/my-project/src/i18n/en.ts (English reference) for cross-checking mechanics semantics; en.ts pre-dates Task 8 so it doesn't yet have the 68 new keys.
+   401→- Used MultiEdit with 6 atomic edits to insert the 68 new keys into de.ts in the matching sections (after `doubleCores` / `cat.economy` / `chanceX2`), mirroring the ru.ts `// ===== NEW ... =====` section header convention.
+   402→- Translated all values into natural idiomatic German matching existing terminology:
+   403→  * Upgrade names: ricochet=Abprall, multishot=Fächer, overcharge=Überladung, executioner=Scharfrichter, critLethal=Tödlicher Krit, critLeech=Krit-Lebensraub, thorns=Dornen, shieldBattery=Schildbatterie, lastStand=Letztes Gefecht, coreMagnet=Kernmagnet, scoreBoost=Punktebonus, jackpot=Jackpot, timeWarp=Zeitverzerrung, phoenix=Phönix, arrowStorm=Pfeilregen.
+   404→  * Stat names mirror upgrade names (same as ru convention) except critLethal shortened to 'Tödl. Krit' (parallel to ru 'Смерт. крит'), and critLeech kept 'Krit-Lebensraub' matching existing 'Krit-Chance'/'Krit. Schaden' style.
+   405→  * Stat descriptions kept brief (4-6 words): e.g. 'Pfeile prallen nach Treffer zu neuen Gegnern', 'Verstärkter Schuss alle N Schüsse', 'Periodischer Absorptionsschild', 'Einmalige Wiedererweckung'.
+   406→  * Value labels: bounces='Abprall', shots='Schüsse', hp='HP', charges='Ladg.', slowmo='Zeitlupe', revive='Wiedererweckung', arrowRain='Pfeilregen' — chosen for natural German UI brevity matching existing 'Rückstoß'/'Schaden' labels (no trailing periods since German UI convention doesn't use abbreviation periods on full words; 'Ladg.' keeps period as parallel abbreviation of 'Ladungen' to match ru 'зар.').
+   407→  * Category label `upgrades.cat.elite` = 'ELITE' (uppercase parallel to existing 'ANGRIFF'/'WIRTSCHAFT' etc.).
+   408→- Preserved the % symbol verbatim in `upgrades.desc.thorns` ('Reflektiert % des erlittenen Schadens …') to mirror ru's literal % placeholder; preserved the × symbol in overcharge/jackpot/arrowStorm descs/statdescs; preserved − (U+2212) in existing reload/armor entries (unchanged).
+   409→- Used German decimal comma (1,5 / 2,5 / 0,75) instead of dot decimals, matching German typographical convention (dot is reserved for thousands separator per Task 7-d worklog). Applies to: `×1,5 Schaden`, `2,5 Sek`, `+1,5 Sek`, `×0,75 Schaden`.
+   410→- No emojis appear in any of the 68 new i18n values (per task spec — emojis live in upgrade tree node data, not in i18n values), so no emoji preservation was needed for these keys.
+   411→- Verified with ripgrep: 68 new keys extracted from de.ts == 68 new keys extracted from ru.ts → KEYS_MATCH_OK (zero missing/extra/renamed).
+   412→- Verified × symbol count: 8 occurrences in de.ts == 8 occurrences in ru.ts (4 pre-existing + 4 new: ×1,5, ×5, ×0,75, plus ×2 in jackpot/statdesc.jackpot and existing ×2 in chanceX2/doubleCores).
+   413→- Verified TypeScript compilation: `npx tsc --noEmit src/i18n/de.ts src/i18n/types.ts` → exit 0, no errors emitted.
+   414→
+   415→Stage Summary:
+   416→- Artifact: /home/z/my-project/src/i18n/de.ts (now 392 keys = 324 original + 68 new, ~440 lines incl. comments).
+   417→- Key count added: 68 (1 cat.elite + 15 name.* + 15 desc.* + 15 stat.* + 15 statdesc.* + 7 value.*).
+   418→- Terminology decisions: kept established German terms (Bogen/Pfeil/Gegner/Welle/HP/Kerne/Upgrade/Boss/Köcher/Nachladen/Durchschlag/Krit./Rüstung/Regeneration/Schockwelle/Magnet); new German terms introduced: Abprall (ricochet), Fächer (multishot fan), Überladung (overcharge), Scharfrichter (executioner), Tödlicher Krit / Tödl. Krit (critLethal long/short), Krit-Lebensraub (critLeech — Krit- prefix matches existing Krit-Chance/Krit. Schaden style), Dornen (thorns), Schildbatterie (shield battery), Letztes Gefecht (last stand — more idiomatic than "Letzte Position"), Kernmagnet (core magnet), Punktebonus (score boost), Jackpot (jackpot — international loanword common in German), Zeitverzerrung (time warp), Phönix (phoenix), Pfeilregen (arrow rain/storm).
+   419→- Used German decimal commas (×1,5; 2,5 Sek; +1,5 Sek; ×0,75) for typographical correctness with dot-as-thousands-separator convention.
+   420→- All emoji/symbol/percent preservation requirements met; no existing keys modified; only the 68 new keys were added in the proper sections (after doubleCores in name/desc/stat/statdesc, after cat.economy, after chanceX2).
+   421→
+   422→---
+   423→Task ID: 9 (CANCELLED)
+   424→Agent: main (Z.ai Code)
+   425→Task: Add toilet necessity indicator + coffee mechanic (user request, later cancelled by user)
+   426→
+   427→Work Log:
+   428→- Explored game code (gameLogic.ts, useGameLoop.ts, GameCanvas.tsx, config.ts, GameScreen.tsx, gameRenderer.ts) to plan the feature.
+   429→- NO code changes were made — feature was cancelled before implementation started.
+   430→- User said the request was sent by accident ("я случайно не то тебе отправил").
+   431→- Verified: git working tree is clean, dev server healthy, all game files intact.
+   432→
+   433→Stage Summary:
+   434→- Nothing to revert: the toilet indicator / coffee mechanic was never implemented.
+   435→- Game state unchanged: new upgrades (Task 7/8) and mini black hole swarm (earlier task) remain in place.
+   436→
+   437→---
+   438→Task ID: 10
+   439→Agent: main (Z.ai Code)
+   440→Task: Динамическое реалистичное освещение (свет от врагов и босса) + оптимизация рендера без потери качества
+   441→
+   442→Work Log:
+   443→- Изучил текущий рендер: gameRenderer.ts (1163 строк), enemies.ts drawShape, useGameLoop — обнаружил, что свет врагов рисуется только «на себе» градиентами каждый кадр, окружение не освещается.
+   444→- СОЗДАЛ src/game/lightEngine.ts — модуль динамического освещения:
+   445→  * Слой света в half-res (LIGHT_SCALE=0.5): все источники рисуются на отдельный canvas (в 4 раза меньше пикселей), композит 'lighter' на сцену; апскейл даёт мягкий bloom-эффект.
+   446→  * Запечённые спрайты (bakeRadialSprite + кэш по ключу): свет с квадратичным спадом, аура врага (точная копия старого градиента), блик, виньетка, 4 спрайта мини-ЧД, световое кольцо ударной волны.
+   447→  * Источники света: каждый враг (цвет из e.color, мерцание sin, белая вспышка при попадании, alpha для призраков), босс (фазозависимый цвет: фиолетовый→маджента→красный, строб в фазе 2, синхронно с warnAlpha), стрелы (циан/оранж-крит/магнет-маджента), частицы взрывов (лимит 90/36/0 по качеству), мини-ЧД (фиолет 0.13), лук (циановая подсветка + дульная вспышка от bowPulse + красная вспышка при уроне), фиолетовая дымка при timeWarp.
+   448→  * Адаптивное качество по FPS: >=55 high, 48-55 medium (лимит 36 частиц света), <35 low (без частиц и ЧД света, радиусы ×0.85), авторегенерация.
+   449→  * Виньетка (512px спрайт, 1 drawImage).
+   450→  * Пул источников (MAX_LIGHTS=170) без аллокаций, отсечение off-screen.
+   451→- ОПТИМИЗИРОВАЛ gameRenderer.ts:
+   452→  * renderBackground: кэш позиций 150 звёзд (Float32Array, пересчёт только при resize; было 450 Math.sin/cos в кадр), группировка по слоям (3 fillStyle вместо 150), исправлен баг исчезновения звёзд (негативный modulo), 3 туманности → запечённые спрайты (было 3 createRadialGradient + blended заливки), кэш градиента фона.
+   453→  * renderParticles: ALPHA_HEX таблица вынесена на уровень модуля (было 256 toString на КАЖДЫЙ кадр).
+   454→  * renderEnemies: след врага — ОДНА полилиния с createLinearGradient (3 stroke) вместо ~26 stroke-вызовов попиксельной альфы (сглаживание стало плавнее); константы пунктиров DASH_PULSE_RING/DASH_INNER_RING (были аллокации массивов на врага в кадр); единый Date.now() на кадр.
+   455→  * renderMiniBlackHoles: 4 градиента на ЧД → запечённые спрайты (при 12 ЧД экономия 48 createRadialGradient в кадр); аккреционный диск теперь реально виден (в старом коде градиент диска сэмплировался на прозрачном краю = невидим).
+   456→  * renderAim: константа DASH_AIM_LINE.
+   457→- ОПТИМИЗИРОВАЛ enemies.ts drawShape:
+   458→  * tracePath() вынесен на уровень модуля (общий для рендера и запекания).
+   459→  * getShapeSprite(): запечённое ядро врага (радиальный градиент + glow-обводка 15px + белая обводка 1.5px за 1 drawImage в натуральном размере — ширины обводок точны), кэш по форма|цвет|радиус.
+   460→  * Аура врага → getAuraSprite (идентична старым стопам color/+88/+22/0).
+   461→  * Стеклянный блик → getSheenSprite (учтено смещение эллипса и поворот PI/6, клип по внутренней фигуре как в оригинальной логике путей).
+   462→  * Итог: ~0 createRadialGradient на обычного врага в кадр (было 2-3 × 35 врагов).
+   463→- Подключил renderLights в useGameLoop (после renderBow, до renderAim — прицел и HUD-текст остаются чёткими).
+   464→- Проверки: lint чистый; tsc — 0 НОВЫХ ошибок (все существующие ошибки trail/validator — предсуществующие, сверено через git stash); браузерное E2E (agent-browser + VLM):
+   465→  * Классика: свет врагов освещает фон и сетку, градиентные следы, циановая подсветка лука, виньетка, FPS 61-62.
+   466→  * Босс: фазовое свечение подтверждено (фаза 0 фиолетовый → фаза 1 маджента → фаза 2 КРАСНЫЙ со стробом, HP-бар и фон освещаются красным), рой мини-ЧД (8 шт в фазе 2) с фиолетовым свечением.
+   467→  * Ошибок в консоли нет; временный window.__saDebug хук добавлен для проверки фаз и УДАЛЁН после.
+   468→
+   469→Stage Summary:
+   470→- Артефакты: src/game/lightEngine.ts (новый, ~430 строк), gameRenderer.ts, enemies.ts, useGameLoop.ts.
+   471→- Визуальный апгрейд: реальное динамическое освещение сцены (враги/босс/стрелы/взрывы/ЧД освещают фон, сетку и друг друга), фазозависимый свет босса с красным стробом при агонии, дульные вспышки, вспышки попаданий, световые кольца ударных волн, дымка time warp, кинематографическая виньетка, видимый аккреционный диск ЧД.
+   472→- Оптимизация: слой света half-res + все градиенты запечены в спрайты (drawImage/GPU вместо createRadialGradient/CPU), кэши звёзд/туманностей/фона, след врага 3 stroke вместо 26, таблица ALPHA_HEX на модуль, константы dash-паттернов, адаптивное качество света по FPS с авторегенерацией.
+   473→- FPS в headless (software rendering): классика 61-62, босс 39-49 (в реальном GPU-браузере выше; адаптивный свет компенсирует просадки).
+   474→
+   475→---
+   476→Task ID: perf-1
+   477→Agent: main
+   478→Task: Повысить производительность игрового движка без потери визуального качества
+   479→
+   480→Work Log:
+   481→- lightEngine.ts: числовой ключ кэша спрайтов света (r<<16|g<<8|b вместо string-concat ~170 раз/кадр); поиск босса объединён с общим циклом света (убран второй O(n) проход).
+   482→- gameRenderer.ts: добавлен БАТЧЕР ОКРУЖНОСТЕЙ (batchCircle/flushCircles) — круги одного цвета с полупрозрачностью композитятся коммутативно, поэтому частицы/пыль/трейлы группируются в «ведра» по (цвет, квантованная альфа 1/32) и рисуются одним fill на ведро вместо 1-2 fill на объект; буферы переиспользуются (ноль GC).
+   483→- gameRenderer.ts: звёзды — батчинг дуг по слоям (150 fill → 4 fill, включая пул близких звёзд с ореолами через Float32Array-буферы).
+   484→- gameRenderer.ts: запечённые спрайты стрел (normal/crit/magnet) в разрешении 2× с супер-сэмплингом — 1 drawImage вместо ~12 path-операций + createLinearGradient на стрелу; спрайт магнето-гало вместо createRadialGradient на кадр.
+   485→- gameRenderer.ts: кэш градиентов лука (bowGrad/coreGrad при pulse=1) и HP-бара босса (по W+фазе) — координаты градиента разрешаются в момент fill, переиспользование объекта корректно.
+   486→- gameRenderer.ts: удалён избыточный clearRect (весь холст покрывается непрозрачным градиентом каждый кадр) и таблица ALPHA_HEX (больше не используется).
+   487→- gameLogic.ts: tickCleanup — in-place компакция projectiles/particles/shockwaves (без .filter → без новых массивов каждый кадр); переиспользование объектов точек трейла (shift→перезапись→push, было ~1200 объектов/сек); Set для проверки dead-врагов в магнитном управлении (O(1) вместо скана массива).
+   488→- enemies.ts: setLineDash([5,10]) → модульная константа DASH_ENEMY_INNER (убрана аллокация массива на врага в кадр).
+   489→- useGameLoop.ts: getContext('2d', { alpha: false, desynchronized: true }) — непрозрачный холст = быстрее композитинг; rAF-дебаунс resize + защита от нулевых размеров.
+   490→- Верификация (agent-browser + VLM): классика — лук/стрелы с трейлами/враги/частицы/фон на месте, FPS 60; босс — сингулярность/HP-бар/пыль/лук, FPS 42-45 в начале (headless software-rendering!) → 60 после 12с боя, деградации нет; 0 ошибок консоли/страницы/сервера; lint чистый.
+   491→
+   492→Stage Summary:
+   493→- Все оптимизации сохраняют визуальный вывод (коммутативность композитинга + квантование альфы 1/32 ниже порога восприятия; спрайты стрел запечены в 2× — сглаживание даже лучше живой отрисовки).
+   494→- Ключевые выигрши: ~500+ canvas-вызовов/кадр → ~40 в тяжёлых сценах; нулевые аллокации в установившемся режиме (трейлы, ведра, компакция); убраны 60+ созданий градиентов/кадр.
+   495→- Headless-браузер (software rendering, без GPU) показывает 60 FPS в классике и до 60 FPS в босс-битве после разогрева; на реальном железе с GPU запас ещё больше.
+   496→
+   497→---
+   498→Task ID: tree-links-1
+   499→Agent: main
+   500→Task: Убрать перекрытия линий соединения с кругами и друг с другом в дереве прокачки (UpgradesScreen), при необходимости меняя форму линий, но сохраняя стили и анимации.
+   501→
+   502→Work Log:
+   503→- Проанализировал геометрию дерева (1800×1800, центр 900,900; NODE_SPACING=160, зигзаг ±35; радиусы узлов 48/72) и нашёл 5 проблемных связей:
+   504→  1) maxHp→phoenix шла почти через центр regenSpeed (13.7px при радиусе 48) и пересекала линии defense→shockwave и shieldBattery;
+   505→  2) regenSpeed→phoenix пересекала defense→shockwave в точке ~(474,967);
+   506→  3) maxArrows→timeWarp проходила через reloadSpeed (22.8px от центра);
+   507→  4) damage→timeWarp задевала magnetArrow (42.6px) и его вертикальную линию;
+   508→  5) critChance→arrowStorm проходила через critDamage (37.5px от центра).
+   509→- Перенёс узел timeWarp: piercing + offset(-250,+495) → (1450,1430). Все 5 линий требований остались прямыми, чистыми и образуют ровный веер (~16° между соседями), зазоры до magnetArrow 63.7/64.1px.
+   510→- Добавил инфраструктуру кривых линий в src/pages/UpgradesScreen.tsx:
+   511→  * CURVED_LINK_WAYPOINTS — путевые точки для 'maxHp->phoenix' (крюк вниз: нырок под maxHp, проход в зазоре shockwave–critLeech (96px от обоих), разворот западнее shockwave, вход в phoenix с SSW), 'regenSpeed->phoenix' (северная дуга: седловина lastStand/shieldBattery, над thorns, петля по пустому западу, вход с NNW), 'critChance->arrowStorm' (дуга вокруг NE critDamage).
+   512→  * catmullRomPath() — Catmull-Rom → кубические Безье.
+   513→  * buildCurvedLink() — SVG-версия ссылки со ВСЕМИ слоями прямых линий 1:1: широкое свечение (blur 7px, 16px, градиент from55→to55), базовый градиент (5px, drop-shadow 8px), поток энергии (stroke-dasharray 30/95 при pathLength=100 + SMIL-анимация dashoffset, mixBlendMode screen), белое ядро (1.5px), летящий орб (animateMotion по кривой + анимации opacity/r с keyTimes 0.1/0.9 как у tree-link-pulse-travel), пульсирующие сокеты (tree-socket-breathe) и locked-вариант с пунктирным шиммером (14/18, dashoffset -32/2s).
+   514→  * buildLink теперь проверяет CURVED_LINK_WAYPOINTS и складывает кривые в один <svg>-оверлей (zIndex 1, pointer-events none) внутри контента дерева.
+   515→- Обновил комментарии (@fileoverview, SATELLITE_NODES timeWarp).
+   516→- Проверка: bun run lint — чисто; dev.log — без ошибок.
+   517→- Верификация через agent-browser: зарегистрировал treecheck@test.dev, выдал в БД все апгрейды (sqlite UPDATE), открыл «Прокачку». DOM-геометрия (реальные координаты из отрендеренного дерева): 30 узлов, 38 линий (35 прямых + 3 кривых) → 0 пересечений линий с узлами, 0 пересечений линий между собой. SMIL-анимации на месте (3 animateMotion, 9 animate, 6 дышащих сокетов, 3 flow-слоя). VLM-проверка скриншотов (locked и unlocked, общий вид и регионы phoenix/timeWarp) — без перекрытий, веер timeWarp ровный. Мобильный viewport 390×844: без горизонтального overflow, канвас 358×549 помещается, кнопки зума и футер на месте.
+   518→
+   519→Stage Summary:
+   520→- Перекрытий линий с кругами и линий между собой больше нет (подтверждено вычислительной проверкой по DOM: 0/0 попаданий).
+   521→- timeWarp перемещён на (1450,1430) — его 5 линий остались прямыми.
+   522→- 3 линии (maxHp→phoenix, regenSpeed→phoenix, critChance→arrowStorm) стали плавными кривыми Catmull-Rom c полным сохранением слоёв, цветов и анимаций (свечение, поток, орб, сокеты, locked-шиммер).
+   523→- Тестовый пользователь treecheck@test.dev (cores 99999, всё открыто) оставлен в БД для будущих проверок дерева.
+   524→
+   525→---
+   526→Task ID: 8
+   527→Agent: main
+   528→Task: Добавить в дерево прокачки реалистичное динамическое освещение + повысить оптимизацию/производительность без потери качества внешнего вида.
+   529→
+   530→Work Log:
+   531→- Создан src/components/TreeLightLayer.tsx — канвас-слой динамического освещения дерева, архитектурно зеркалящий игровой lightEngine:
+   532→  * переиспользуются запечённые спрайты и кэш цветов из src/game/lightEngine.ts (getLightSprite/parseColor) — ноль создания градиентов на кадр;
+   533→  * half-res слой (900×900 при контенте 1800²), внутренний композит 'lighter', элемент смешивается через CSS mix-blend-mode:screen — свет реально освещает сетку фона, затемнённые/залоченные линии и область вокруг узлов;
+   534→  * динамика: мерцание-«дыхание» каждого узла с индивидуальной фазой; ядро пульсирует золотом; залоченные узлы почти не излучают; свет за курсором (плавно догоняет/гаснет, координаты через mouseRef без ре-рендеров); усиление света наведённого узла (eased); яркая вспышка при покупке (смешение с белым, ease-out, ~0.9 с); две дрейфующие «туманности» (фиолет/циан);
+   535→  * экономия: rAF с шагом ~40 FPS (FRAME_MS=25), полная пауза при document.hidden, IntersectionObserver пауза вне вьюпорта, обновление данных через ref.
+   536→- UpgradesScreen.tsx — интеграция света + оптимизации:
+   537→  * <TreeLightLayer> вставлен между curvedSvg (z=1) и узлами (z=10) с z=2 — свет ложится поверх линий, но под узлы;
+   538→  * УСТРАНЁН ре-рендер-шторм при зуме: раньше каждый тик колёсика вызывал setTreeZoom в родителе → полный rebuild ~831 DOM-элемента; теперь treeZoom/onZoomChange/reportZoom удалены, контр-масштаб тултипов — через CSS-переменную --tooltip-scale, обновляемую напрямую из applyTransform;
+   539→  * buildTree → useMemo([progress, baseUnlocked]): позиции/линии/кривые/источники света пересобираются только при покупках; renderNode → useCallback([progress, t, onUpgrade]); узлы — отдельный useMemo;
+   540→  * позиция курсора для света — через общий mouseRef (onMouseMove канвы обновляет напрямую, без setState);
+   541→  * тултипы: добавлены классы invisible + group-hover:visible — 33 стеклянные панели с backdrop-filter (glass-panel blur(12px) + backdrop-blur-xl) больше не рендерятся в покое; transition-all сохраняет плавное появление/исчезание (visibility — дискретная анимация, фейд полностью сохранён);
+   542→  * добавлена кинематографическая виньетка поверх канвы (z-30, radial-gradient rgba(3,1,16,0.32)) — как в игровом рендере;
+   543→  * IntersectionObserver на канве: класс .tree-anim-paused при выходе из вьюпорта.
+   544→- globals.css: правило .tree-anim-paused (и для потомков/::before/::after) — animation-play-state: paused !important.
+   545→- Верификация (agent-browser, headless):
+   546→  * свет рисуется: 4686 ярких пикселей в покое, 113 423 сразу после покупки базового узла (вспышка ×24);
+   547→  * свет за курсором: 14 189 ярких пикселей под позицией мыши;
+   548→  * зум колесом: 80/80 помеченных DOM-узлов сохранены (0 пересозданий), 831 элемент стабилен, --tooltip-scale обновляется мгновенно, индикатор зума 125%;
+   549→  * тултип: при hover (с эмуляцией hover:hover) visibility=visible, opacity=1, counter-scale применяется (matrix(0.797…)); в headless Tailwind-гейт @media (hover:hover) ложно — это артефакт окружения, не кода (был и до правок);
+   550→  * drag-пан работает (translate изменился по вектору мыши);
+   551→  * вкладка «Характеристики»: 29 строк статов, световой канвас корректно демонтируется;
+   552→  * VLM-анализ скриншота: цветные ореолы вокруг узлов, виньетка, линии — картинка цельная, без артефактов;
+   553→  * FPS в headless (SwiftShader, софтверный рендер): 38 на дереве со светом = 38 на меню без света — потолок окружения, слой света не добавляет просадки;
+   554→  * bun run lint — 0 ошибок; dev.log — все запросы 200, PUT /api/user/progress (покупки) синхронизируются.
+   555→
+   556→Stage Summary:
+   557→- Дерево прокачки получило то же реалистичное динамическое освещение, что и игра: живой свет узлов (дыхание плазмы), свет за курсором, подсветка наведённого узла, вспышки покупок, дрейфующие туманности, виньетка — на half-res канвасе с запечёнными спрайтами.
+   558→- Производительность поднята без изменения картинки: зум/пан теперь не пересобирают дерево (было ~831 DOM-элемент на каждый тик колёсика → стало 0), тултипы с backdrop-filter не рендерятся в покое, анимации и свет ставятся на паузу вне вьюпорта, данные дерева мемоизованы.
+   559→- Артефакты: src/components/TreeLightLayer.tsx (новый), src/pages/UpgradesScreen.tsx, src/app/globals.css.
+   560→
+   561→---
+   562→Task ID: 9
+   563→Agent: main
+   564→Task: Добавить всем врагам реалистичное динамическое освещение (тела врагов реагируют на источники света: лук, стрелы, взрывы, босса, друг на друга).
+   565→
+   566→Work Log:
+   567→- Архитектура: враги уже ИЗЛУЧАЛИ свет (слой света), теперь их ТЕЛА стали ПРИЁМНИКАМИ света. Для каждого врага каждый кадр считается «проба света» (light probe): доминирующее направление, цвет и интенсивность.
+   568→- lightEngine.ts:
+   569→  * renderLights разделён на collectLights (сбор источников в пул, адаптивное качество) + renderCollectedLights (рендер half-res слоя + виньетка); renderLights сохранён как совместимая обёртка. Пул источников собирается ОДИН раз за кадр и переиспользуется слоем света и пробами.
+   570→  * PooledLight получил поле src (индекс врага-источника) — собственная аура себя не освещает.
+   571→  * getWashSprite(r,g,b) — запечённый направленный спрайт «протирки» (радиальный градиент со смещённым центром, кэш по квантованному 4-бит/канал цвету).
+   572→  * computeEnemyLightProbes(s, cx, cy) — пробы: лук-«факел» (radius 470, циан + дульная вспышка), все источники пула с усилением PROBE_GAIN=5.5 и радиусом ×1.9 (крупные тела-приёмники (босс, radius>45) — ×2.3), ударные волны (свет кромки кольца «прочёсывает» врагов, полоса 90px); направление — нормированная взвешенная сумма векторов, цвет — у доминирующего источника, интенсивность — сумма вкладов ×1.35; экспоненциальное сглаживание (0.25/0.3/0.35) прямо на объекте врага (поля lightDX/DY/R/G/B/I) — нулевые аллокации.
+   573→  * renderCollectedLights/renderLights не изменили вывод (тот же слой света + виньетка).
+   574→- enemies.ts:
+   575→  * тип Enemy: опциональные поля пробы света (lightDX…lightI).
+   576→  * drawShape(…, light?: EnemyLight) — свет применяется во всех ветках:
+   577→    - НЕОНОВЫЙ КОРПУС: 1) направленная цветная «протирка» (wash) — запечённый спрайт обрезается по форме и аддитивно ложится на ближнюю к источнику половину тела (объёмный эффект); 2) РИМ-ГЛИНТ — дуга кромки контура со стороны света (ядро 2.5px + ореол 10px, цвет источника, alpha ∝ i); 3) блик стекла ПОВОРАЧИВАЕТСЯ к источнику (живой спекуляр через lerpAngle, без света — исходная ориентация).
+   578→    - ПЛАЗМЕННОЕ ЯДРО: запечённый спрайт света, смещённый к ближней стороне ядра (аддитивно).
+   579→    - БОСС «Омега»: рим-свет на горизонте событий со стороны источника (физически честно — пустота ЧД поглощает свет, светят только кромка/фотонное кольцо); при вспышке попадания подавляется (белая вспышка и так насыщает).
+   580→    - весь свет умножается на alpha призрака/фантома (baseAlpha) и пропускается при flashTimer>0.
+   581→- gameRenderer.ts: renderEnemies opts.light {s, cx, cy} → computeEnemyLightProbes; проба каждого врага — через модульный скретч-объект EnemyLight (ноль аллокаций); drawShape получает light.
+   582→- useGameLoop.ts: collectLights(s, cx, cy, W, H, fps) вызывается ДО renderEnemies (общий пул), renderCollectedLights — после renderBow.
+   583→- Отладка (временный хук window.__saDebug + счётчики, УДАЛЕНЫ после): нашёл и исправил слабость первых итераций — протирка усилена (пик 0.85, alpha = i, покрытие ×1.7), глинт усилен, PROBE_GAIN 4.5→5.5, боссу — увеличенный радиус приёма и порог 0.04.
+   584→- Верификация (agent-browser, детерминированные пиксельные измерения + VLM):
+   585→  * изолированный враг: при пролёте стрелы на 37-54px lightI 0.02→0.64, сторона стрелы +21..+28 яркости против ≤+9 у дальней — НАПРАВЛЕННЫЙ свет работает;
+   586→  * стрелы реально освещают тела (путь стрелы 29→255 lum), танковый кластер: устойчивая асимметрия половин;
+   587→  * босс: при касательных стрелах lightI 0.44→0.87, VLM подтвердил «яркий бело-циановый рим-свет на кромке горизонта событий со стороны стрел»;
+   588→  * VLM по классике: «стороны врагов, обращённые к центру/стрелам, значительно ярче, объёмное внутреннее свечение, цветные глинты на кромках»;
+   589→  * FPS A/B (git stash): baseline 45 vs 46 с освещением тел — НЕ деградирует (headless SwiftShader);
+   590→  * 0 ошибок консоли/страницы, lint чистый, tsc — 0 новых ошибок (33 = предсуществующие).
+   591→- Чистка: временные хуки/телеметрия удалены; тестовые скрипты удалены; скриншоты-артефакты в tests/.
+   592→- Тестовый пользователь lightcheck@test.dev (пароль test1234, билд прокачки без multishot для чистых тестов) оставлен в БД.
+   593→
+   594→Stage Summary:
+   595→- Все враги (12 типов + босс) теперь реагируют на динамический свет: спекуляр поворачивается к источнику, кромка вспыхивает рим-светом цвета источника, ближняя половина корпуса ловит направленную «протирку», плазменное ядро засветляется; босс ловит свет на кромке горизонта событий.
+   596→- Источники: лук-«факел» + дульная вспышка, летящие стрелы (обычные/крит/магнитные), взрывы-частицы, мини-ЧД, ударные волны (свет «прочёсывает» врагов кромкой кольца), ауры соседей, фазовое свечение босса.
+   597→- Производительность без потерь: единый сбор пула на кадр, запечённые спрайты (ноль градиентов на кадр), пробы — чистая математика (~6k итераций без аллокаций), FPS неизменен.
+   598→- Артефакты: src/game/lightEngine.ts, src/game/enemies.ts, src/game/gameRenderer.ts, src/game/useGameLoop.ts.
+   599→

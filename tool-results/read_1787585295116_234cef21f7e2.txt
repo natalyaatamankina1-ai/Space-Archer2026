@@ -1,0 +1,1422 @@
+     1→     1→/**
+     2→     2→ * @fileoverview Игровая логика SPACE ARCHER.
+     3→     3→ *
+     4→     4→ * Этот модуль содержит всю сервер-независимую игровую логику:
+     5→     5→ * - Состояние игры (InternalGameState)
+     6→     6→ * - Спавн врагов (tickSpawn)
+     7→     7→ * - Движение врагов и столкновения (tickEnemies)
+     8→     8→ * - Движение стрел и попадания (tickProjectiles)
+     9→     9→ * - Очистку мёртвых объектов (tickCleanup)
+    10→    10→ * - Способности босса (гравитационные лучи, мини-чёрные дыры)
+    11→    11→ * - Пыль в режиме босса (tickDustParticles)
+    12→    12→ *
+    13→    13→ * Все функции «tick*» вызываются из useGameLoop.ts каждый кадр (~60fps).
+    14→    14→ * Функции не используют React — это чистый игровой движок.
+    15→    15→ *
+    16→    16→ * @see useGameLoop.ts — где вызываются эти функции
+    17→    17→ * @see gameRenderer.ts — где результаты отрисовываются
+    18→    18→ */
+    19→    19→
+    20→    20→import { Enemy, Projectile, Particle, DustParticle, ENEMY_TYPES, createEnemy } from './enemies';
+    21→    21→import { audio } from './audioManager';
+    22→    22→import { GAME_CONFIG } from './config';
+    23→    23→
+    24→    24→export interface InternalGameState {
+    25→    25→  mode: 'classic' | 'boss';
+    26→    26→  hp: number;
+    27→    27→  maxHp: number;
+    28→    28→  hpRegenRate: number;
+    29→    29→  hpRegenTimer: number;
+    30→    30→  invulnTimer: number;
+    31→    31→  score: number;
+    32→    32→  wave: number;
+    33→    33→  arrows: number;
+    34→    34→  maxArrows: number;
+    35→    35→  reloading: boolean;
+    36→    36→  reloadProgress: number;
+    37→    37→  reloadTimer: number;
+    38→    38→  reloadFrames: number;
+    39→    39→  damageMult: number;
+    40→    40→  piercingVal: number;
+    41→    41→  projSpeedMult: number;
+    42→    42→  critChance: number;
+    43→    43→  critDamage: number;
+    44→    44→  defenseMult: number;
+    45→    45→  magnetArrow: number;
+    46→    46→  shockwave: number;
+    47→    47→  activeShockwaves: { x: number; y: number; radius: number; maxRadius: number; life: number; maxLife: number }[];
+    48→    48→  doubleCores: number;
+    49→    49→  doubleCoresTriggered: number;
+    50→    50→  dustParticles: DustParticle[];
+    51→    51→  spawnTimer: number;
+    52→    52→  waveTimer: number;
+    53→    53→  enemies: Enemy[];
+    54→    54→  projectiles: Projectile[];
+    55→    55→  particles: Particle[];
+    56→    56→  alive: boolean;
+    57→    57→  bowPulse: number;
+    58→    58→  canShoot: boolean;
+    59→    59→  shootCooldown: number;
+    60→    60→  frame: number;
+    61→    61→  paused: boolean;
+    62→    62→  enemiesKilled: number;
+    63→    63→  // Boss abilities
+    64→    64→  bossGravityBeamTimer: number;   // countdown to next beam pulse
+    65→    65→  bossGravityBeams: { x1: number; y1: number; x2: number; y2: number; life: number; maxLife: number; targetIdx: number }[];
+    66→    66→  miniBlackHoles: { x: number; y: number; radius: number; absorbRadius: number; life: number; maxLife: number; angle: number }[];
+    67→    67→  miniBlackHoleTimer: number;     // countdown to next mini BH spawn (phase 1+)
+    68→    68→  bossPhase: number;              // 0, 1, 2
+    69→    69→
+    70→    70→  // ===== NEW UPGRADE FIELDS =====
+    71→    71→  // Attack branch
+    72→    72→  ricochet: number;          // ricochet level (bounces per hit)
+    73→    73→  multishot: number;          // multishot level (extra arrow chance)
+    74→    74→  overcharge: number;         // overcharge level (empowered every Nth shot)
+    75→    75→  overchargeCounter: number;  // shot counter for overcharge
+    76→    76→  executioner: number;        // executioner level (bonus dmg vs low-HP)
+    77→    77→  // Critical branch
+    78→    78→  critLethal: number;         // crit lethal level (instakill threshold)
+    79→    79→  critLeech: number;          // crit leech level (HP on crit)
+    80→    80→  // Defense branch
+    81→    81→  thorns: number;              // thorns level (reflect % damage)
+    82→    82→  shieldBattery: number;      // shield battery level (overshield charges)
+    83→    83→  shieldBatteryCharges: number; // current charges available
+    84→    84→  shieldBatteryTimer: number;  // countdown to next charge regen
+    85→    85→  lastStand: number;           // last stand level (low-HP damage reduction)
+    86→    86→  // Economy branch
+    87→    87→  coreMagnet: number;          // core magnet level (chance for bonus core on kill)
+    88→    88→  scoreBoost: number;          // score boost level (+X% score)
+    89→    89→  jackpot: number;             // jackpot level (chance ×5 cores on kill)
+    90→    90→  bonusCoresAccumulated: number; // bonus cores accumulated during the run
+    91→    91→  // Elite satellite nodes
+    92→    92→  timeWarp: number;            // time warp level
+    93→    93→  timeWarpActive: number;      // >0 means slow-mo is active (countdown)
+    94→    94→  timeWarpTimer: number;       // countdown to next activation
+    95→    95→  phoenix: number;             // phoenix level
+    96→    96→  phoenixUsed: boolean;        // already revived?
+    97→    97→  arrowStorm: number;          // arrow storm level
+    98→    98→  arrowStormTimer: number;    // countdown to next arrow rain
+    99→    99→}
+   100→   100→
+   101→   101→export function spawnParticles(s: InternalGameState, x: number, y: number, color: string, count = 8) {
+   102→   102→  if (s.particles.length > 300) return;
+   103→   103→  if (s.particles.length > 200) count = Math.min(count, 3);
+   104→   104→  for (let i = 0; i < count; i++) {
+   105→   105→    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+   106→   106→    const speed = 1.5 + Math.random() * 3;
+   107→   107→    s.particles.push({
+   108→   108→      x, y,
+   109→   109→      vx: Math.cos(angle) * speed,
+   110→   110→      vy: Math.sin(angle) * speed,
+   111→   111→      life: 40 + Math.random() * 20,
+   112→   112→      maxLife: 60,
+   113→   113→      color,
+   114→   114→      radius: 2 + Math.random() * 3,
+   115→   115→    });
+   116→   116→  }
+   117→   117→}
+   118→   118→
+   119→   119→export function tickSpawn(
+   120→   120→  s: InternalGameState,
+   121→   121→  W: number,
+   122→   122→  H: number,
+   123→   123→) {
+   124→   124→  if (s.mode === 'boss') {
+   125→   125→    if (s.frame === 120) {
+   126→   126→      // Spawn Boss Omega
+   127→   127→      const bossType = ENEMY_TYPES.find(t => t.id === 'boss_omega')!;
+   128→   128→      const e = createEnemy(bossType, W, H, { x: W / 2, y: -bossType.radius * 2 });
+   129→   129→      e.vx = 0;
+   130→   130→      e.vy = bossType.speed;
+   131→   131→      s.enemies.push(e);
+   132→   132→      s.bossGravityBeamTimer = 180; // first beam after 3 seconds
+   133→   133→      s.miniBlackHoleTimer = 180;   // first mini BH after 3 seconds
+   134→   134→    }
+   135→   135→
+   136→   136→    // Track boss phase based on HP
+   137→   137→    const boss = s.enemies.find(e => e.id === 'boss_omega');
+   138→   138→    if (boss) {
+   139→   139→      const hpRatio = boss.hp / boss.maxHp;
+   140→   140→      s.bossPhase = hpRatio > 0.67 ? 0 : (hpRatio > 0.33 ? 1 : 2);
+   141→   141→    }
+   142→   142→
+   143→   143→    // Spawn add-ons: phase 2 spawns ALL enemy types; earlier phases spawn a subset.
+   144→   144→    if (s.frame > 300) {
+   145→   145→      s.spawnTimer++;
+   146→   146→      const currentSpawnDelay = Math.max(30, 150 - Math.floor((s.frame - 300) / 300) * 10);
+   147→   147→      if (s.spawnTimer > currentSpawnDelay) {
+   148→   148→        s.spawnTimer = 0;
+   149→   149→        if (s.enemies.length < 35) {
+   150→   150→          let typesId: string[];
+   151→   151→          if (s.bossPhase >= 2) {
+   152→   152→            // Phase 2: ALL enemy types
+   153→   153→            typesId = ['scout', 'tank', 'zigzagger', 'ghost', 'splitter', 'berserker', 'bouncer', 'spiraler', 'juggernaut', 'phantom', 'necromancer'];
+   154→   154→          } else {
+   155→   155→            typesId = ['scout', 'scout', 'zigzagger', 'ghost', 'splitter'];
+   156→   156→          }
+   157→   157→          const randomType = ENEMY_TYPES.find(t => t.id === typesId[Math.floor(Math.random() * typesId.length)])!;
+   158→   158→          const e = createEnemy(randomType, W, H);
+   159→   159→
+   160→   160→          // Strength multiplier based on time
+   161→   161→          const strengthMult = 1 + Math.floor((s.frame - 300) / 600) * 0.2;
+   162→   162→
+   163→   163→          e.maxHp = Math.ceil(e.maxHp * strengthMult);
+   164→   164→          e.hp = e.maxHp;
+   165→   165→          e.speed *= GAME_CONFIG.enemies.speedMult * (1 + (strengthMult - 1) * 0.5);
+   166→   166→          e.vx = (e.vx / Math.abs(e.vx || 1)) * Math.abs(e.speed) || 0;
+   167→   167→          e.vy = (e.vy / Math.abs(e.vy || 1)) * Math.abs(e.speed) || 0;
+   168→   168→          e.damage = Math.ceil(e.damage * GAME_CONFIG.enemies.damageToPlayerMult * strengthMult);
+   169→   169→
+   170→   170→          s.enemies.push(e);
+   171→   171→        }
+   172→   172→      }
+   173→   173→    }
+   174→   174→
+   175→   175→    // === Boss Ability: Gravity Beams (phase 0+) ===
+   176→   176→    // Periodically fires purple animated beams to all enemies, pulling & orbiting them.
+   177→   177→    if (boss) {
+   178→   178→      s.bossGravityBeamTimer--;
+   179→   179→      if (s.bossGravityBeamTimer <= 0) {
+   180→   180→        // Fire beams to all non-boss enemies
+   181→   181→        for (let i = 0; i < s.enemies.length; i++) {
+   182→   182→          const target = s.enemies[i];
+   183→   183→          if (!target || target.id === 'boss_omega') continue;
+   184→   184→          s.bossGravityBeams.push({
+   185→   185→            x1: boss.x, y1: boss.y,
+   186→   186→            x2: target.x, y2: target.y,
+   187→   187→            life: 30, maxLife: 30,
+   188→   188→            targetIdx: i,
+   189→   189→          });
+   190→   190→        }
+   191→   191→        audio.playHit();
+   192→   192→        s.bossGravityBeamTimer = 240; // every 4 seconds
+   193→   193→      }
+   194→   194→
+   195→   195→      // Update active beams: pull enemies toward boss and add orbital motion
+   196→   196→      for (let bi = s.bossGravityBeams.length - 1; bi >= 0; bi--) {
+   197→   197→        const beam = s.bossGravityBeams[bi];
+   198→   198→        beam.life--;
+   199→   199→        // Update beam end position to follow the target
+   200→   200→        const target = s.enemies[beam.targetIdx];
+   201→   201→        if (target && target.id !== 'boss_omega') {
+   202→   202→          beam.x2 = target.x;
+   203→   203→          beam.y2 = target.y;
+   204→   204→
+   205→   205→          // Pull enemy toward boss (stronger as beam ages)
+   206→   206→          const pullStrength = 0.15 * (1 - beam.life / beam.maxLife);
+   207→   207→          const dx = boss.x - target.x;
+   208→   208→          const dy = boss.y - target.y;
+   209→   209→          const d = Math.sqrt(dx * dx + dy * dy);
+   210→   210→          if (d > 80) { // don't pull if already very close
+   211→   211→            target.vx += (dx / d) * pullStrength;
+   212→   212→            target.vy += (dy / d) * pullStrength;
+   213→   213→          } else {
+   214→   214→            // When close, add tangential velocity to orbit
+   215→   215→            const tx = -dy / d;
+   216→   216→            const ty = dx / d;
+   217→   217→            target.vx += tx * 0.3;
+   218→   218→            target.vy += ty * 0.3;
+   219→   219→            // Cap speed
+   220→   220→            const speed = Math.sqrt(target.vx * target.vx + target.vy * target.vy);
+   221→   221→            if (speed > 4) {
+   222→   222→              target.vx = (target.vx / speed) * 4;
+   223→   223→              target.vy = (target.vy / speed) * 4;
+   224→   224→            }
+   225→   225→          }
+   226→   226→        }
+   227→   227→        if (beam.life <= 0) {
+   228→   228→          s.bossGravityBeams.splice(bi, 1);
+   229→   229→        }
+   230→   230→      }
+   231→   231→    }
+   232→   232→
+   233→   233→    // === Boss Ability: Mini Black Holes (phase 1+) ===
+   234→   234→    // Spawns stationary black holes at random positions that absorb nearby arrows.
+   235→   235→    // The boss floods the battlefield with MANY holes at once: up to 6 in phase 1,
+   236→   236→    // and up to 12 (a whole swarm) in phase 2. Spawn rate outpaces the lifetime
+   237→   237→    // so the field actually fills up and stays densely covered.
+   238→   238→    if (s.bossPhase >= 1) {
+   239→   239→      s.miniBlackHoleTimer--;
+   240→   240→      const maxBH = s.bossPhase >= 2 ? 12 : 6;
+   241→   241→      if (s.miniBlackHoleTimer <= 0 && s.miniBlackHoles.length < maxBH) {
+   242→   242→        // Spawn at random position, not too close to the bow and not overlapping existing BHs
+   243→   243→        const cx = W / 2, cy = H / 2;
+   244→   244→        let mx = 0, my = 0;
+   245→   245→        let placed = false;
+   246→   246→        for (let attempt = 0; attempt < 16; attempt++) {
+   247→   247→          mx = 100 + Math.random() * (W - 200);
+   248→   248→          my = 100 + Math.random() * (H - 200);
+   249→   249→          // Keep a safe corridor around the bow
+   250→   250→          if (Math.hypot(mx - cx, my - cy) < 180) continue;
+   251→   251→          // Don't stack on top of existing black holes — spread the swarm out
+   252→   252→          let tooClose = false;
+   253→   253→          for (let j = 0; j < s.miniBlackHoles.length; j++) {
+   254→   254→            const other = s.miniBlackHoles[j];
+   255→   255→            if (Math.hypot(mx - other.x, my - other.y) < 90) {
+   256→   256→              tooClose = true;
+   257→   257→              break;
+   258→   258→            }
+   259→   259→          }
+   260→   260→          if (!tooClose) {
+   261→   261→            placed = true;
+   262→   262→            break;
+   263→   263→          }
+   264→   264→        }
+   265→   265→        if (placed) {
+   266→   266→          const life = s.bossPhase >= 2 ? 720 : 540; // 12s (phase 2) or 9s (phase 1) — long-lived swarm
+   267→   267→          s.miniBlackHoles.push({
+   268→   268→            x: mx, y: my,
+   269→   269→            radius: 16 + Math.random() * 6,
+   270→   270→            absorbRadius: 70,
+   271→   271→            life,
+   272→   272→            maxLife: life,
+   273→   273→            angle: 0,
+   274→   274→          });
+   275→   275→        }
+   276→   276→        // Spawn fast enough to outpace death: ~2/s in phase 2 → ~12 on screen at peak
+   277→   277→        s.miniBlackHoleTimer = s.bossPhase >= 2 ? 30 : 90; // 0.5s (phase 2) or 1.5s (phase 1)
+   278→   278→      }
+   279→   279→
+   280→   280→      // Update mini black holes
+   281→   281→      for (let mi = s.miniBlackHoles.length - 1; mi >= 0; mi--) {
+   282→   282→        const mbh = s.miniBlackHoles[mi];
+   283→   283→        mbh.life--;
+   284→   284→        mbh.angle += 0.03;
+   285→   285→        // Fade out in the last second
+   286→   286→        if (mbh.life <= 0) {
+   287→   287→          s.miniBlackHoles.splice(mi, 1);
+   288→   288→        }
+   289→   289→      }
+   290→   290→    }
+   291→   291→
+   292→   292→    s.waveTimer++; // for boss phases
+   293→   293→    return;
+   294→   294→  }
+   295→   295→
+   296→   296→  s.spawnTimer++;
+   297→   297→  s.waveTimer++;
+   298→   298→  if (s.waveTimer > GAME_CONFIG.waves.waveDurationFrames) {
+   299→   299→    s.wave++;
+   300→   300→    s.waveTimer = 0;
+   301→   301→  }
+   302→   302→  const currentSpawnRate = Math.max(GAME_CONFIG.waves.minSpawnRate, GAME_CONFIG.waves.baseSpawnRate - s.wave * GAME_CONFIG.waves.spawnRateDecreasePerWave);
+   303→   303→  if (s.spawnTimer >= currentSpawnRate) {
+   304→   304→    s.spawnTimer = 0;
+   305→   305→
+   306→   306→    // Stronger enemies appear earlier: all 11 non-boss types are available by wave 4.
+   307→   307→    // Wave 1: scout, tank, zigzagger (3 types)
+   308→   308→    // Wave 2: + ghost, splitter, berserker (6 types)
+   309→   309→    // Wave 3: + bouncer, spiraler (8 types)
+   310→   310→    // Wave 4+: + juggernaut, phantom, necromancer (all 11)
+   311→   311→    const allTypes = ENEMY_TYPES.filter(t => t.id !== 'boss_omega');
+   312→   312→    let availableTypes: typeof allTypes;
+   313→   313→    if (s.wave >= 4) {
+   314→   314→      availableTypes = allTypes;
+   315→   315→    } else if (s.wave === 3) {
+   316→   316→      availableTypes = allTypes.slice(0, 8);
+   317→   317→    } else if (s.wave === 2) {
+   318→   318→      availableTypes = allTypes.slice(0, 6);
+   319→   319→    } else {
+   320→   320→      availableTypes = allTypes.slice(0, 3);
+   321→   321→    }
+   322→   322→
+   323→   323→    // Dynamic weights: stronger enemies get more common on higher waves.
+   324→   324→    // Base weights stay (scout common early), but scale up for tougher types.
+   325→   325→    const pool: (typeof allTypes[0])[] = [];
+   326→   326→    availableTypes.forEach(t => {
+   327→   327→      let weight = 1;
+   328→   328→      if (t.id === 'scout') weight = Math.max(2, 6 - s.wave); // less common later
+   329→   329→      if (t.id === 'tank') weight = 1 + Math.floor(s.wave / 3);
+   330→   330→      if (t.id === 'zigzagger') weight = 4;
+   331→   331→      if (t.id === 'ghost') weight = 2 + Math.floor(s.wave / 3);
+   332→   332→      if (t.id === 'splitter') weight = 2 + Math.floor(s.wave / 4);
+   333→   333→      if (t.id === 'berserker') weight = 1 + Math.floor(s.wave / 2);
+   334→   334→      if (t.id === 'bouncer') weight = 2 + Math.floor(s.wave / 3);
+   335→   335→      if (t.id === 'spiraler') weight = 1 + Math.floor(s.wave / 2);
+   336→   336→      if (t.id === 'juggernaut') weight = Math.max(1, Math.floor(s.wave / 3));
+   337→   337→      if (t.id === 'phantom') weight = Math.max(1, Math.floor(s.wave / 2));
+   338→   338→      if (t.id === 'necromancer') weight = Math.max(1, Math.floor(s.wave / 4));
+   339→   339→
+   340→   340→      for (let i = 0; i < weight; i++) {
+   341→   341→        pool.push(t);
+   342→   342→      }
+   343→   343→    });
+   344→   344→
+   345→   345→    // Fewer enemies per spawn: max 2, grows slower than before.
+   346→   346→    const enemiesToSpawn = Math.min(2, 1 + Math.floor(s.wave / 4));
+   347→   347→    for (let i = 0; i < enemiesToSpawn; i++) {
+   348→   348→      const type = pool[Math.floor(Math.random() * pool.length)];
+   349→   349→      const e = createEnemy(type, W, H);
+   350→   350→      
+   351→   351→      // Apply base config multipliers
+   352→   352→      e.maxHp = Math.ceil(e.maxHp);
+   353→   353→      e.hp = e.maxHp;
+   354→   354→      
+   355→   355→      e.speed *= GAME_CONFIG.enemies.speedMult;
+   356→   356→      e.vx *= GAME_CONFIG.enemies.speedMult;
+   357→   357→      e.vy *= GAME_CONFIG.enemies.speedMult;
+   358→   358→      
+   359→   359→      e.damage = Math.ceil(e.damage * GAME_CONFIG.enemies.damageToPlayerMult);
+   360→   360→      
+   361→   361→      s.enemies.push(e);
+   362→   362→    }
+   363→   363→  }
+   364→   364→}
+   365→   365→
+   366→   366→export function tickReload(
+   367→   367→  s: InternalGameState,
+   368→   368→  cx: number,
+   369→   369→  cy: number,
+   370→   370→  emitState: () => void,
+   371→   371→) {
+   372→   372→  if (!s.reloading) return;
+   373→   373→  s.reloadTimer--;
+   374→   374→  s.reloadProgress = 1 - s.reloadTimer / s.reloadFrames;
+   375→   375→  if (s.reloadTimer <= 0) {
+   376→   376→    s.reloading = false;
+   377→   377→    s.arrows = s.maxArrows;
+   378→   378→    s.reloadProgress = 0;
+   379→   379→    spawnParticles(s, cx, cy, '#00ffff', 6);
+   380→   380→  }
+   381→   381→  emitState();
+   382→   382→}
+   383→   383→
+   384→   384→/**
+   385→   385→ * Elite upgrade abilities (time warp slow-mo, arrow storm rain).
+   386→   386→ * Called every frame from useGameLoop, after tickSpawn.
+   387→   387→ */
+   388→   388→export function tickAbilities(s: InternalGameState, W: number, H: number) {
+   389→   389→  const cx = W / 2;
+   390→   390→  const cy = H / 2;
+   391→   391→
+   392→   392→  // ===== Time Warp elite — periodic slow-mo on all enemies =====
+   393→   393→  if (s.timeWarp > 0) {
+   394→   394→    if (s.timeWarpActive > 0) {
+   395→   395→      s.timeWarpActive--;
+   396→   396→      if (s.timeWarpActive === 0) {
+   397→   397→        // Slow-mo ended — visual cue
+   398→   398→        spawnParticles(s, cx, cy, '#9d4edd', 12);
+   399→   399→      }
+   400→   400→    } else {
+   401→   401→      if (s.timeWarpTimer > 0) s.timeWarpTimer--;
+   402→   402→      if (s.timeWarpTimer <= 0) {
+   403→   403→        s.timeWarpActive = GAME_CONFIG.timeWarp.durationFrames;
+   404→   404→        s.timeWarpTimer = GAME_CONFIG.timeWarp.cooldownFrames;
+   405→   405→        spawnParticles(s, cx, cy, '#9d4edd', 30);
+   406→   406→        audio.playHit();
+   407→   407→      }
+   408→   408→    }
+   409→   409→  }
+   410→   410→
+   411→   411→  // ===== Arrow Storm elite — periodic screen-wide rain =====
+   412→   412→  if (s.arrowStorm > 0) {
+   413→   413→    if (s.arrowStormTimer > 0) s.arrowStormTimer--;
+   414→   414→    if (s.arrowStormTimer <= 0) {
+   415→   415→      s.arrowStormTimer = GAME_CONFIG.arrowStorm.cooldownFrames;
+   416→   416→      const stormDamage = s.damageMult * GAME_CONFIG.arrowStorm.damageMult;
+   417→   417→      const speed = GAME_CONFIG.player.projectileSpeed * 1.2;
+   418→   418→      for (let k = 0; k < GAME_CONFIG.arrowStorm.arrowsPerRain; k++) {
+   419→   419→        const x = Math.random() * W;
+   420→   420→        s.projectiles.push({
+   421→   421→          x, y: -20,
+   422→   422→          vx: (Math.random() - 0.5) * 1.5, // tiny horizontal drift
+   423→   423→          vy: speed,
+   424→   424→          radius: GAME_CONFIG.player.projectileRadius,
+   425→   425→          trail: [],
+   426→   426→          pierceLeft: 1,
+   427→   427→          hitEnemies: [],
+   428→   428→          damage: stormDamage,
+   429→   429→          isCrit: false,
+   430→   430→          isMagnet: false,
+   431→   431→          isStorm: true,
+   432→   432→        });
+   433→   433→      }
+   434→   434→      spawnParticles(s, cx, 30, '#00ffff', 20);
+   435→   435→      audio.playExplosion();
+   436→   436→    }
+   437→   437→  }
+   438→   438→}
+   439→   439→
+   440→   440→export function tickPlayer(s: InternalGameState, emitState: () => void) {
+   441→   441→  // Invulnerability timer
+   442→   442→  if (s.invulnTimer > 0) s.invulnTimer--;
+   443→   443→
+   444→   444→  // HP regeneration
+   445→   445→  if (s.hpRegenTimer > 0) {
+   446→   446→    s.hpRegenTimer--;
+   447→   447→  } else if (s.hp < s.maxHp) {
+   448→   448→    s.hp = Math.min(s.maxHp, s.hp + s.hpRegenRate);
+   449→   449→    emitState();
+   450→   450→  }
+   451→   451→
+   452→   452→  // ===== Shield Battery: regen charges over time =====
+   453→   453→  if (s.shieldBattery > 0 && s.shieldBatteryCharges < s.shieldBattery) {
+   454→   454→    if (s.shieldBatteryTimer > 0) {
+   455→   455→      s.shieldBatteryTimer--;
+   456→   456→    } else {
+   457→   457→      s.shieldBatteryCharges++;
+   458→   458→      // Next charge takes: base - (level-1)*reduction → faster with more levels
+   459→   459→      s.shieldBatteryTimer = Math.max(
+   460→   460→        60,
+   461→   461→        GAME_CONFIG.shieldBattery.chargeIntervalBase - (s.shieldBattery - 1) * GAME_CONFIG.shieldBattery.intervalReductionPerLevel
+   462→   462→      );
+   463→   463→    }
+   464→   464→  } else if (s.shieldBatteryTimer > 0) {
+   465→   465→    s.shieldBatteryTimer--;
+   466→   466→  }
+   467→   467→}
+   468→   468→
+   469→   469→export function tickEnemies(
+   470→   470→  s: InternalGameState,
+   471→   471→  W: number,
+   472→   472→  H: number,
+   473→   473→  cx: number,
+   474→   474→  cy: number,
+   475→   475→  emitState: () => void,
+   476→   476→  onGameOver: (score: number) => void,
+   477→   477→) {
+   478→   478→  const deadEnemies: number[] = [];
+   479→   479→  // Cache boss lookup ONCE (was O(n) per orbiting enemy → O(n²) total).
+   480→   480→  const boss = s.enemies.find(b => b.id === 'boss_omega') || null;
+   481→   481→
+   482→   482→  // Time Warp slow-mo — applied to ALL enemy movement (pattern position updates).
+   483→   483→  const slowMult = s.timeWarpActive > 0 ? GAME_CONFIG.timeWarp.enemySpeedMult : 1;
+   484→   484→
+   485→   485→  s.enemies.forEach((e, i) => {
+   486→   486→    if (e.flashTimer > 0) e.flashTimer--;
+   487→   487→
+   488→   488→    let skipPattern = false;
+   489→   489→
+   490→   490→    if (e.orbitPhase === 'orbiting' || e.orbitPhase === 'pull') {
+   491→   491→      if (!boss) {
+   492→   492→        // If boss died while orbiting or pulling, release immediately
+   493→   493→        e.orbitPhase = 'released';
+   494→   494→        e.pattern = 'chase'; // Ensure they resume chasing
+   495→   495→      } else {
+   496→   496→        skipPattern = true; // wait for boss to manipulate them or orbit
+   497→   497→        
+   498→   498→        if (e.orbitPhase === 'orbiting') {
+   499→   499→          e.orbitTimer = (e.orbitTimer || 0) + 1;
+   500→   500→          e.orbitAngle = (e.orbitAngle || 0) + 0.05;
+   501→   501→          e.x = boss.x + Math.cos(e.orbitAngle) * (e.orbitRadius || 100);
+   502→   502→          e.y = boss.y + Math.sin(e.orbitAngle) * (e.orbitRadius || 100);
+   503→   503→          
+   504→   504→          if (e.orbitTimer > 300) {
+   505→   505→            e.orbitPhase = 'released';
+   506→   506→            e.bossBuffed = true;
+   507→   507→            // Buff the enemy
+   508→   508→            e.maxHp *= 2;
+   509→   509→            e.hp = e.maxHp;
+   510→   510→            e.speed *= 1.8;
+   511→   511→            e.damage = Math.floor(e.damage * 1.5);
+   512→   512→            e.color = boss.glowColor;
+   513→   513→            e.glowColor = '#ff0000';
+   514→   514→            e.radius *= 1.2;
+   515→   515→            
+   516→   516→            spawnParticles(s, e.x, e.y, e.glowColor, 20);
+   517→   517→            
+   518→   518→            // Re-target towards player directly as straight projectile
+   519→   519→            e.pattern = 'straight';
+   520→   520→            const dx = cx - e.x;
+   521→   521→            const dy = cy - e.y;
+   522→   522→            const d = Math.sqrt(dx * dx + dy * dy);
+   523→   523→            e.vx = (dx / d) * e.speed;
+   524→   524→            e.vy = (dy / d) * e.speed;
+   525→   525→            skipPattern = false; // release this frame
+   526→   526→          }
+   527→   527→        }
+   528→   528→      }
+   529→   529→    }
+   530→   530→
+   531→   531→    if (!skipPattern) {
+   532→   532→      switch (e.pattern) {
+   533→   533→      case 'straight':
+   534→   534→      case 'split':
+   535→   535→        e.x += e.vx * slowMult;
+   536→   536→        e.y += e.vy * slowMult;
+   537→   537→        break;
+   538→   538→      case 'zigzag': {
+   539→   539→        e.zigzagTimer++;
+   540→   540→        e.x += e.vx * slowMult;
+   541→   541→        e.y += e.vy * slowMult;
+   542→   542→        if (e.zigzagTimer % 40 === 0) {
+   543→   543→          // Вычисляем направление к игроку
+   544→   544→          const tdx = cx - e.x; const tdy = cy - e.y;
+   545→   545→          const td = Math.sqrt(tdx * tdx + tdy * tdy);
+   546→   546→          const toPlayerX = tdx / td; const toPlayerY = tdy / td;
+   547→   547→          // Перпендикуляр к направлению на игрока
+   548→   548→          const perp = { x: -toPlayerY, y: toPlayerX };
+   549→   549→          const flip = Math.random() > 0.5 ? 1 : -1;
+   550→   550→          // Смешиваем: 70% к игроку + 50% зигзаг
+   551→   551→          const nx = toPlayerX + perp.x * flip * 0.5;
+   552→   552→          const ny = toPlayerY + perp.y * flip * 0.5;
+   553→   553→          const nd = Math.sqrt(nx * nx + ny * ny);
+   554→   554→          e.vx = (nx / nd) * e.speed;
+   555→   555→          e.vy = (ny / nd) * e.speed;
+   556→   556→        }
+   557→   557→        break;
+   558→   558→      }
+   559→   559→      case 'chase': {
+   560→   560→        const dx = cx - e.x;
+   561→   561→        const dy = cy - e.y;
+   562→   562→        const d = Math.sqrt(dx * dx + dy * dy);
+   563→   563→        e.vx = (dx / d) * e.speed;
+   564→   564→        e.vy = (dy / d) * e.speed;
+   565→   565→        e.x += e.vx * slowMult;
+   566→   566→        e.y += e.vy * slowMult;
+   567→   567→        break;
+   568→   568→      }
+   569→   569→      case 'teleport': {
+   570→   570→        // Плавное появление fade-in
+   571→   571→        if ((e.teleportAlpha ?? 1) < 1) {
+   572→   572→          e.teleportAlpha = Math.min(1, (e.teleportAlpha ?? 0) + 0.06);
+   573→   573→        }
+   574→   574→        // Анимация кольца при появлении
+   575→   575→        if ((e.teleportRingAnim ?? 0) > 0) {
+   576→   576→          e.teleportRingAnim = (e.teleportRingAnim ?? 0) - 1;
+   577→   577→        }
+   578→   578→
+   579→   579→        if (!e.teleportFading) {
+   580→   580→          e.x += e.vx * slowMult;
+   581→   581→          e.y += e.vy * slowMult;
+   582→   582→        }
+   583→   583→        e.teleportTimer--;
+   584→   584→
+   585→   585→        if (e.teleportTimer <= 0 && !e.teleportFading) {
+   586→   586→          if ((e.teleportsLeft ?? 0) > 0) {
+   587→   587→            // Есть ещё телепортации — уходим в fade-out
+   588→   588→            e.teleportFading = true;
+   589→   589→            e.teleportTimer = 18;
+   590→   590→          }
+   591→   591→          // Если телепортаций не осталось — просто летим прямо (chase), таймер не сбрасываем
+   592→   592→        }
+   593→   593→
+   594→   594→        if (e.teleportFading) {
+   595→   595→          e.teleportAlpha = Math.max(0, (e.teleportAlpha ?? 1) - 0.09);
+   596→   596→          if ((e.teleportAlpha ?? 0) <= 0) {
+   597→   597→            // Появляемся в случайной точке ВНУТРИ экрана (не за краем),
+   598→   598→            // но НЕ слишком близко к Луку (центру), чтобы дать игроку время отреагировать.
+   599→   599→            const margin3 = 80;
+   600→   600→            const safeRadius = 220; // min distance from the bow after teleport
+   601→   601→            let nx = 0, ny = 0;
+   602→   602→            for (let attempt = 0; attempt < 8; attempt++) {
+   603→   603→              nx = margin3 + Math.random() * (W - margin3 * 2);
+   604→   604→              ny = margin3 + Math.random() * (H - margin3 * 2);
+   605→   605→              const distToBow = Math.hypot(nx - cx, ny - cy);
+   606→   606→              if (distToBow >= safeRadius) break;
+   607→   607→            }
+   608→   608→            // If still too close after attempts, push outward along the vector from the bow
+   609→   609→            const distFinal = Math.hypot(nx - cx, ny - cy);
+   610→   610→            if (distFinal < safeRadius && distFinal > 0) {
+   611→   611→              const push = (safeRadius - distFinal) + 20;
+   612→   612→              const dirx = (nx - cx) / distFinal;
+   613→   613→              const diry = (ny - cy) / distFinal;
+   614→   614→              nx += dirx * push;
+   615→   615→              ny += diry * push;
+   616→   616→              // Clamp back inside the screen margins
+   617→   617→              nx = Math.max(margin3, Math.min(W - margin3, nx));
+   618→   618→              ny = Math.max(margin3, Math.min(H - margin3, ny));
+   619→   619→            } else if (distFinal === 0) {
+   620→   620→              // Edge case: exactly on center — nudge to the right
+   621→   621→              nx = Math.min(W - margin3, cx + safeRadius + 20);
+   622→   622→            }
+   623→   623→            e.x = nx;
+   624→   624→            e.y = ny;
+   625→   625→            const tdx = cx - e.x; const tdy = cy - e.y;
+   626→   626→            const td = Math.sqrt(tdx * tdx + tdy * tdy);
+   627→   627→            e.vx = (tdx / td) * e.speed; e.vy = (tdy / td) * e.speed;
+   628→   628→            // Эффект появления: частицы + кольцо
+   629→   629→            spawnParticles(s, e.x, e.y, e.color, 12);
+   630→   630→            e.teleportRingAnim = 30;
+   631→   631→            e.teleportFading = false;
+   632→   632→            e.teleportAlpha = 0;
+   633→   633→            e.teleportsLeft = (e.teleportsLeft ?? 1) - 1;
+   634→   634→            e.teleportTimer = 90 + Math.random() * 90;
+   635→   635→
+   636→   636→            // Если телепортаций больше нет — переключаемся на chase
+   637→   637→            if ((e.teleportsLeft ?? 0) <= 0) {
+   638→   638→              (e as Enemy).pattern = 'chase';
+   639→   639→              e.teleportAlpha = 1;
+   640→   640→            }
+   641→   641→          }
+   642→   642→        }
+   643→   643→        break;
+   644→   644→      }
+   645→   645→      case 'bounce':
+   646→   646→        if (!e.bouncerEntered) {
+   647→   647→          e.x += e.vx * slowMult;
+   648→   648→          e.y += e.vy * slowMult;
+   649→   649→          if (e.x > e.radius && e.x < W - e.radius && e.y > e.radius && e.y < H - e.radius) {
+   650→   650→            e.bouncerEntered = true;
+   651→   651→          }
+   652→   652→        } else {
+   653→   653→          e.x += e.vx * slowMult;
+   654→   654→          e.y += e.vy * slowMult;
+   655→   655→          if (e.x - e.radius < 0) { e.x = e.radius; e.vx = Math.abs(e.vx); spawnParticles(s, e.x, e.y, e.color, 4); }
+   656→   656→          if (e.x + e.radius > W) { e.x = W - e.radius; e.vx = -Math.abs(e.vx); spawnParticles(s, e.x, e.y, e.color, 4); }
+   657→   657→          if (e.y - e.radius < 0) { e.y = e.radius; e.vy = Math.abs(e.vy); spawnParticles(s, e.x, e.y, e.color, 4); }
+   658→   658→          if (e.y + e.radius > H) { e.y = H - e.radius; e.vy = -Math.abs(e.vy); spawnParticles(s, e.x, e.y, e.color, 4); }
+   659→   659→        }
+   660→   660→        break;
+   661→   661→      case 'spiral': {
+   662→   662→        const dx = cx - e.x;
+   663→   663→        const dy = cy - e.y;
+   664→   664→        const d = Math.sqrt(dx * dx + dy * dy);
+   665→   665→        
+   666→   666→        // Tangent vector for orbiting
+   667→   667→        const tx = -dy / d;
+   668→   668→        const ty = dx / d;
+   669→   669→        
+   670→   670→        // Combine forward movement (0.3) and orbital movement (1.2)
+   671→   671→        e.vx = (dx / d) * e.speed * 0.3 + tx * e.speed * 1.2;
+   672→   672→        e.vy = (dy / d) * e.speed * 0.3 + ty * e.speed * 1.2;
+   673→   673→        
+   674→   674→        e.x += e.vx * slowMult;
+   675→   675→        e.y += e.vy * slowMult;
+   676→   676→        e.angle += 0.15; // Fast visual spin
+   677→   677→        break;
+   678→   678→      }
+   679→   679→      case 'stealth': {
+   680→   680→        const dx = cx - e.x;
+   681→   681→        const dy = cy - e.y;
+   682→   682→        const d = Math.sqrt(dx * dx + dy * dy);
+   683→   683→        e.vx = (dx / d) * e.speed;
+   684→   684→        e.vy = (dy / d) * e.speed;
+   685→   685→        e.x += e.vx * slowMult;
+   686→   686→        e.y += e.vy * slowMult;
+   687→   687→        
+   688→   688→        // Become visible if close to player or recently hit
+   689→   689→        if (d < 220 || e.flashTimer > 0) {
+   690→   690→          e.teleportAlpha = Math.min(1, (e.teleportAlpha ?? 0) + 0.08);
+   691→   691→        } else {
+   692→   692→          e.teleportAlpha = Math.max(0.15, (e.teleportAlpha ?? 1) - 0.03);
+   693→   693→        }
+   694→   694→        break;
+   695→   695→      }
+   696→   696→      case 'summoner': {
+   697→   697→        const dx = cx - e.x;
+   698→   698→        const dy = cy - e.y;
+   699→   699→        const d = Math.sqrt(dx * dx + dy * dy);
+   700→   700→        
+   701→   701→        // Keep distance from player (around 250-300px)
+   702→   702→        const targetDist = 280;
+   703→   703→        let speedMult = 1;
+   704→   704→        if (d < targetDist - 20) {
+   705→   705→          speedMult = -1; // Move away
+   706→   706→        } else if (d > targetDist + 20) {
+   707→   707→          speedMult = 1; // Move closer
+   708→   708→        } else {
+   709→   709→          speedMult = 0.1; // Orbit slowly
+   710→   710→        }
+   711→   711→        
+   712→   712→        const tx = -dy / d;
+   713→   713→        const ty = dx / d;
+   714→   714→        
+   715→   715→        e.vx = (dx / d) * e.speed * speedMult + tx * e.speed * 0.5;
+   716→   716→        e.vy = (dy / d) * e.speed * speedMult + ty * e.speed * 0.5;
+   717→   717→        
+   718→   718→        e.x += e.vx * slowMult;
+   719→   719→        e.y += e.vy * slowMult;
+   720→   720→        
+   721→   721→        // Summon logic
+   722→   722→        e.summonTimer = (e.summonTimer ?? 0) + 1;
+   723→   723→        if (e.summonTimer >= 180) { // Summon every 3 seconds
+   724→   724→          e.summonTimer = 0;
+   725→   725→          const scoutType = ENEMY_TYPES.find(t => t.id === 'scout')!;
+   726→   726→          const scout = createEnemy(scoutType, W, H, {
+   727→   727→            x: e.x + (Math.random() - 0.5) * 40,
+   728→   728→            y: e.y + (Math.random() - 0.5) * 40,
+   729→   729→          });
+   730→   730→          
+   731→   731→          // Apply base config multipliers
+   732→   732→          scout.maxHp = Math.ceil(scout.maxHp);
+   733→   733→          scout.hp = scout.maxHp;
+   734→   734→          
+   735→   735→          scout.speed *= GAME_CONFIG.enemies.speedMult;
+   736→   736→          scout.vx *= GAME_CONFIG.enemies.speedMult;
+   737→   737→          scout.vy *= GAME_CONFIG.enemies.speedMult;
+   738→   738→          
+   739→   739→          scout.damage = Math.ceil(scout.damage * GAME_CONFIG.enemies.damageToPlayerMult);
+   740→   740→          
+   741→   741→          s.enemies.push(scout);
+   742→   742→          spawnParticles(s, e.x, e.y, e.color, 15);
+   743→   743→        }
+   744→   744→        break;
+   745→   745→      }
+   746→   746→      case 'boss_omega': {
+   747→   747→        e.summonTimer = (e.summonTimer ?? 0) + 1;
+   748→   748→        const phase = Math.min(2, Math.floor((e.maxHp - e.hp) / (e.maxHp / 3))); // 0, 1, 2
+   749→   749→        const dx = cx - e.x;
+   750→   750→        const dy = cy - e.y;
+   751→   751→        const d = Math.sqrt(dx * dx + dy * dy);
+   752→   752→        
+   753→   753→        // Base distance that fluctuates unpredictably using sine waves
+   754→   754→        const baseTargetDist = 380 + Math.sin(e.summonTimer * 0.015) * 120 + Math.cos(e.summonTimer * 0.027) * 80;
+   755→   755→        // Ensure it doesn't get too close to the player (minimum 250px away)
+   756→   756→        const targetDist = Math.max(250, baseTargetDist - phase * 30);
+   757→   757→        
+   758→   758→        let radialSpeedMult = 1;
+   759→   759→        if (d < targetDist - 10) radialSpeedMult = -1.5; // push away strongly if too close
+   760→   760→        else if (d > targetDist + 10) radialSpeedMult = 1.0;
+   761→   761→        else radialSpeedMult = 0.1;
+   762→   762→        
+   763→   763→        // Tangential (orbital) direction
+   764→   764→        // Occasionally switch orbit direction or speed up wildly based on phase
+   765→   765→        const orbitDir = Math.sign(Math.sin(e.summonTimer * 0.005)) || 1;
+   766→   766→        const orbitVary = Math.sin(e.summonTimer * 0.03) * 0.8;
+   767→   767→        const orbitSpeedMult = (1.5 + orbitVary + phase * 0.5) * orbitDir;
+   768→   768→        
+   769→   769→        const tx = -dy / d;
+   770→   770→        const ty = dx / d;
+   771→   771→        
+   772→   772→        e.vx = (dx / d) * e.speed * radialSpeedMult + tx * e.speed * orbitSpeedMult;
+   773→   773→        e.vy = (dy / d) * e.speed * radialSpeedMult + ty * e.speed * orbitSpeedMult;
+   774→   774→        
+   775→   775→        e.x += e.vx * slowMult;
+   776→   776→        e.y += e.vy * slowMult;
+   777→   777→        
+   778→   778→        // Constrain boss to screen boundaries
+   779→   779→        e.x = Math.max(e.radius, Math.min(W - e.radius, e.x));
+   780→   780→        e.y = Math.max(e.radius, Math.min(H - e.radius, e.y));
+   781→   781→        
+   782→   782→        // Attract and pull enemies into orbit instead of spawning
+   783→   783→        for (let j = 0; j < s.enemies.length; j++) {
+   784→   784→          const other = s.enemies[j];
+   785→   785→          if (!other || other.id === 'boss_omega' || other.bossBuffed || other.orbitPhase === 'orbiting' || other.orbitPhase === 'released') continue;
+   786→   786→          
+   787→   787→          const ox = e.x - other.x;
+   788→   788→          const oy = e.y - other.y;
+   789→   789→          const od = Math.sqrt(ox * ox + oy * oy);
+   790→   790→          
+   791→   791→          // Pull aura
+   792→   792→          if (od < e.radius * 4) {
+   793→   793→            // Strong pull
+   794→   794→            if (other.orbitPhase !== 'pull') {
+   795→   795→               spawnParticles(s, other.x, other.y, e.glowColor, 3);
+   796→   796→            }
+   797→   797→            other.orbitPhase = 'pull';
+   798→   798→            other.x += (ox / od) * other.speed * 2.5; 
+   799→   799→            other.y += (oy / od) * other.speed * 2.5;
+   800→   800→            
+   801→   801→            // If very close, catch them into orbit
+   802→   802→            if (od < e.radius * 1.5) {
+   803→   803→              other.orbitPhase = 'orbiting';
+   804→   804→              other.orbitTimer = 0;
+   805→   805→              other.orbitRadius = e.radius * 1.5 + Math.random() * 40;
+   806→   806→              other.orbitAngle = Math.atan2(-oy, -ox); // angle relative to boss
+   807→   807→              spawnParticles(s, other.x, other.y, e.glowColor, 8);
+   808→   808→            }
+   809→   809→          }
+   810→   810→        }
+   811→   811→        
+   812→   812→        e.angle += 0.05 + phase * 0.02; // Visual spin
+   813→   813→        break;
+   814→   814→      }
+   815→   815→    }
+   816→   816→    }
+   817→   817→
+   818→   818→    // Update trail
+   819→   819→    if (!e.trail) e.trail = [];
+   820→   820→    e.trail.push({ x: e.x, y: e.y });
+   821→   821→    // Keep trail length depending on speed
+   822→   822→    if (e.trail.length > 8) {
+   823→   823→      e.trail.shift();
+   824→   824→    }
+   825→   825→
+   826→   826→    // Pulse effect
+   827→   827→    if (e.pulseGrowing) {
+   828→   828→      e.pulseRadius += 0.15;
+   829→   829→      if (e.pulseRadius > e.radius + 4) e.pulseGrowing = false;
+   830→   830→    } else {
+   831→   831→      e.pulseRadius -= 0.15;
+   832→   832→      if (e.pulseRadius < e.radius) e.pulseGrowing = true;
+   833→   833→    }
+   834→   834→
+   835→   835→    // HP bar rotation
+   836→   836→    e.angle += 0.01;
+   837→   837→
+   838→   838→    // Check collision with bow
+   839→   839→    const dx = e.x - cx;
+   840→   840→    const dy = e.y - cy;
+   841→   841→    const distSq = dx * dx + dy * dy;
+   842→   842→    const radSum = e.radius + 20;
+   843→   843→    if (distSq < radSum * radSum) {
+   844→   844→      if (s.invulnTimer <= 0) {
+   845→   845→        // ===== Last Stand: extra damage reduction below 25% HP =====
+   846→   846→        let dmgMult = s.defenseMult;
+   847→   847→        if (s.lastStand > 0 && s.hp < s.maxHp * GAME_CONFIG.lastStand.hpThreshold) {
+   848→   848→          dmgMult *= (1 - GAME_CONFIG.lastStand.damageReduction);
+   849→   849→        }
+   850→   850→        let totalDamage = Math.max(1, Math.round(e.damage * dmgMult));
+   851→   851→
+   852→   852→        // ===== Shield Battery: absorb damage with charges first =====
+   853→   853→        if (s.shieldBattery > 0 && s.shieldBatteryCharges > 0 && totalDamage > 0) {
+   854→   854→          const absorbed = Math.min(totalDamage, GAME_CONFIG.shieldBattery.absorbPerCharge);
+   855→   855→          totalDamage = Math.max(0, totalDamage - absorbed);
+   856→   856→          s.shieldBatteryCharges--;
+   857→   857→          spawnParticles(s, cx, cy, '#00ffff', 10);
+   858→   858→        }
+   859→   859→
+   860→   860→        s.hp = Math.max(0, s.hp - totalDamage);
+   861→   861→        spawnParticles(s, cx, cy, '#ff0000', 8);
+   862→   862→        audio.playPlayerHit();
+   863→   863→
+   864→   864→        s.hpRegenTimer = GAME_CONFIG.player.hpRegenDelayFrames; // delay
+   865→   865→        s.invulnTimer = GAME_CONFIG.player.invulnFramesAfterHit; // invulnerability
+   866→   866→        s.bowPulse = 20;
+   867→   867→
+   868→   868→        // ===== Thorns: reflect a % of incoming damage back to the attacker =====
+   869→   869→        if (s.thorns > 0) {
+   870→   870→          const reflect = Math.max(1, Math.round(e.damage * s.thorns * GAME_CONFIG.thorns.reflectPerLevel));
+   871→   871→          e.hp -= reflect;
+   872→   872→          spawnParticles(s, e.x, e.y, '#00ff41', 5);
+   873→   873→          // If thorns killed the enemy, mark it dead
+   874→   874→          if (e.hp <= 0 && !deadEnemies.includes(i)) {
+   875→   875→            deadEnemies.push(i);
+   876→   876→            spawnParticles(s, e.x, e.y, e.color, 12);
+   877→   877→            audio.playExplosion();
+   878→   878→          }
+   879→   879→        }
+   880→   880→
+   881→   881→        // Shockwave upgrade: emit a wave that pushes enemies away from the bow
+   882→   882→        if (s.shockwave > 0) {
+   883→   883→          const cfg = GAME_CONFIG.shockwave;
+   884→   884→          s.activeShockwaves.push({
+   885→   885→            x: cx, y: cy,
+   886→   886→            radius: 25,
+   887→   887→            maxRadius: cfg.waveMaxRadius,
+   888→   888→            life: cfg.waveLife,
+   889→   889→            maxLife: cfg.waveLife,
+   890→   890→          });
+   891→   891→          // Push all alive enemies away from the bow.
+   892→   892→          // Use a Set for O(1) dead-enemy lookups (only built when shockwave fires).
+   893→   893→          const deadSet = new Set(deadEnemies);
+   894→   894→          s.enemies.forEach((other, oi) => {
+   895→   895→            if (oi === i) return; // skip the one that hit
+   896→   896→            if (deadSet.has(oi)) return;
+   897→   897→            const odx = other.x - cx;
+   898→   898→            const ody = other.y - cy;
+   899→   899→            const od = Math.sqrt(odx * odx + ody * ody);
+   900→   900→            if (od > 0 && od < cfg.radius) {
+   901→   901→              const force = (1 - od / cfg.radius) * cfg.pushForce;
+   902→   902→              other.x += (odx / od) * force;
+   903→   903→              other.y += (ody / od) * force;
+   904→   904→              spawnParticles(s, other.x, other.y, other.color, 3);
+   905→   905→            }
+   906→   906→          });
+   907→   907→          audio.playExplosion();
+   908→   908→        }
+   909→   909→
+   910→   910→        emitState();
+   911→   911→        if (s.hp <= 0) {
+   912→   912→          // ===== Phoenix: revive once at 50% HP =====
+   913→   913→          if (s.phoenix > 0 && !s.phoenixUsed) {
+   914→   914→            s.phoenixUsed = true;
+   915→   915→            s.hp = Math.floor(s.maxHp * GAME_CONFIG.phoenix.reviveHpPct);
+   916→   916→            s.invulnTimer = GAME_CONFIG.phoenix.invulnFrames;
+   917→   917→            s.alive = true;
+   918→   918→            spawnParticles(s, cx, cy, '#ffaa00', 35);
+   919→   919→            audio.playExplosion();
+   920→   920→            emitState();
+   921→   921→          } else {
+   922→   922→            s.alive = false;
+   923→   923→            audio.playGameOver();
+   924→   924→            onGameOver(s.score);
+   925→   925→          }
+   926→   926→        }
+   927→   927→      }
+   928→   928→      deadEnemies.push(i);
+   929→   929→    }
+   930→   930→
+   931→   931→    // Out of bounds
+   932→   932→    if (e.pattern !== 'bounce') {
+   933→   933→      const margin = 200;
+   934→   934→      if (e.x < -margin || e.x > W + margin || e.y < -margin || e.y > H + margin) {
+   935→   935→        deadEnemies.push(i);
+   936→   936→      }
+   937→   937→    }
+   938→   938→  });
+   939→   939→
+   940→   940→  return deadEnemies;
+   941→   941→}
+   942→   942→
+   943→   943→export function tickProjectiles(
+   944→   944→  s: InternalGameState,
+   945→   945→  W: number,
+   946→   946→  H: number,
+   947→   947→  deadEnemies: number[],
+   948→   948→  emitState: () => void,
+   949→   949→  onBossDefeated: () => void = () => {},
+   950→   950→) {
+   951→   951→  for (let pi = s.projectiles.length - 1; pi >= 0; pi--) {
+   952→   952→    const p = s.projectiles[pi];
+   953→   953→    let hitSomething = false;
+   954→   954→
+   955→   955→    for (let ei = 0; ei < s.enemies.length; ei++) {
+   956→   956→      if (p.hitEnemies.includes(ei)) continue; // prevent multihits
+   957→   957→      if (deadEnemies.includes(ei)) continue;
+   958→   958→
+   959→   959→      const e = s.enemies[ei];
+   960→   960→      const dx = p.x - e.x;
+   961→   961→      const dy = p.y - e.y;
+   962→   962→      const distSq = dx * dx + dy * dy;
+   963→   963→      const radSum = p.radius + e.radius;
+   964→   964→
+   965→   965→      if (distSq < radSum * radSum) {
+   966→   966→        // ===== Compute damage with new upgrades (executioner, critLethal) =====
+   967→   967→        let dmg = p.damage;
+   968→   968→        // Executioner: bonus damage vs low-HP enemies (50% + 10%/level threshold)
+   969→   969→        if (s.executioner > 0) {
+   970→   970→          const execThreshold = GAME_CONFIG.executioner.hpThresholdBase + (s.executioner - 1) * GAME_CONFIG.executioner.hpThresholdPerLevel;
+   971→   971→          if (e.hp <= e.maxHp * execThreshold) {
+   972→   972→            dmg *= (1 + s.executioner * GAME_CONFIG.executioner.damageBonusPerLevel);
+   973→   973→          }
+   974→   974→        }
+   975→   975→        // Crit Lethal: crits instakill normal enemies below threshold HP
+   976→   976→        const lethalThreshold = s.critLethal * GAME_CONFIG.critLethal.hpThresholdPerLevel;
+   977→   977→        const isLethal = p.isCrit && s.critLethal > 0
+   978→   978→          && (GAME_CONFIG.critLethal.bossImmune ? e.id !== 'boss_omega' : true)
+   979→   979→          && e.hp <= e.maxHp * lethalThreshold;
+   980→   980→        if (isLethal) {
+   981→   981→          dmg = e.hp; // instakill
+   982→   982→          spawnParticles(s, e.x, e.y, '#ff00ff', 10);
+   983→   983→        }
+   984→   984→        e.hp -= dmg;
+   985→   985→        e.flashTimer = 8;
+   986→   986→        spawnParticles(s, e.x, e.y, p.isCrit ? '#ffaa00' : (e.id === 'boss_omega' ? e.glowColor : e.color), p.isCrit ? 10 : 5);
+   987→   987→        audio.playHit();
+   988→   988→
+   989→   989→        // ===== Crit Leech: heal player on crit =====
+   990→   990→        if (p.isCrit && s.critLeech > 0) {
+   991→   991→          const healed = s.critLeech * GAME_CONFIG.critLeech.healPerLevel;
+   992→   992→          if (s.hp < s.maxHp) {
+   993→   993→            s.hp = Math.min(s.maxHp, s.hp + healed);
+   994→   994→            spawnParticles(s, cx, cy, '#ff006e', 4);
+   995→   995→          }
+   996→   996→        }
+   997→   997→
+   998→   998→        p.hitEnemies.push(ei);
+   999→   999→        hitSomething = true;
+  1000→  1000→
+  1001→  1001→        if (e.hp <= 0) {
+  1002→  1002→          // Score Boost: +X% score per level
+  1003→  1003→          const scoreMult = 1 + s.scoreBoost * GAME_CONFIG.scoreBoost.bonusPerLevel;
+  1004→  1004→          s.score += Math.round(e.points * s.wave * scoreMult);
+  1005→  1005→          s.enemiesKilled++;
+  1006→  1006→          // Double Cores upgrade: chance to trigger x2 cores per non-boss enemy kill
+  1007→  1007→          if (s.doubleCores > 0 && e.id !== 'boss_omega') {
+  1008→  1008→            const chance = s.doubleCores * GAME_CONFIG.doubleCores.chancePerLevel;
+  1009→  1009→            if (Math.random() < chance) {
+  1010→  1010→              s.doubleCoresTriggered++;
+  1011→  1011→              spawnParticles(s, e.x, e.y, '#00ffff', 12);
+  1012→  1012→            }
+  1013→  1013→          }
+  1014→  1014→          // ===== Core Magnet: chance for bonus core on kill =====
+  1015→  1015→          if (s.coreMagnet > 0 && e.id !== 'boss_omega') {
+  1016→  1016→            if (Math.random() < s.coreMagnet * GAME_CONFIG.coreMagnet.chancePerLevel) {
+  1017→  1017→              s.bonusCoresAccumulated += GAME_CONFIG.coreMagnet.bonusPerTrigger;
+  1018→  1018→              spawnParticles(s, e.x, e.y, '#00ffff', 6);
+  1019→  1019→            }
+  1020→  1020→          }
+  1021→  1021→          // ===== Jackpot: rare chance for ×5 bonus cores =====
+  1022→  1022→          if (s.jackpot > 0 && e.id !== 'boss_omega') {
+  1023→  1023→            if (Math.random() < s.jackpot * GAME_CONFIG.jackpot.chancePerLevel) {
+  1024→  1024→              s.bonusCoresAccumulated += GAME_CONFIG.jackpot.multiplier;
+  1025→  1025→              spawnParticles(s, e.x, e.y, '#ffd700', 18);
+  1026→  1026→            }
+  1027→  1027→          }
+  1028→  1028→          spawnParticles(s, e.x, e.y, e.id === 'boss_omega' ? e.glowColor : e.color, 15);
+  1029→  1029→          audio.playExplosion();
+  1030→  1030→
+  1031→  1031→          if (e.id === 'splitter' && !e.splitDone) {
+  1032→  1032→            e.splitDone = true;
+  1033→  1033→            const scout = ENEMY_TYPES.find(t => t.id === 'scout')!;
+  1034→  1034→            for (let k = 0; k < 2; k++) {
+  1035→  1035→              const sp = createEnemy(scout, W, H, {
+  1036→  1036→                x: e.x + (Math.random() - 0.5) * 40,
+  1037→  1037→                y: e.y + (Math.random() - 0.5) * 40,
+  1038→  1038→              });
+  1039→  1039→              
+  1040→  1040→              sp.maxHp = Math.ceil(sp.maxHp);
+  1041→  1041→              sp.hp = sp.maxHp;
+  1042→  1042→              sp.speed *= GAME_CONFIG.enemies.speedMult;
+  1043→  1043→              sp.vx *= GAME_CONFIG.enemies.speedMult;
+  1044→  1044→              sp.vy *= GAME_CONFIG.enemies.speedMult;
+  1045→  1045→              sp.damage = Math.ceil(sp.damage * GAME_CONFIG.enemies.damageToPlayerMult);
+  1046→  1046→              
+  1047→  1047→              s.enemies.push(sp);
+  1048→  1048→            }
+  1049→  1049→          }
+  1050→  1050→
+  1051→  1051→          if (!deadEnemies.includes(ei)) deadEnemies.push(ei);
+  1052→  1052→          emitState();
+  1053→  1053→
+  1054→  1054→          // End game if Boss Omega dies
+  1055→  1055→          if (e.id === 'boss_omega') {
+  1056→  1056→            s.alive = false;
+  1057→  1057→            onBossDefeated();
+  1058→  1058→          }
+  1059→  1059→        }
+  1060→  1060→
+  1061→  1061→        // Arrows never pierce through the boss — they are destroyed on impact.
+  1062→  1062→        // For all other enemies, piercing works normally.
+  1063→  1063→        if (e.id === 'boss_omega') {
+  1064→  1064→          s.projectiles.splice(pi, 1);
+  1065→  1065→          break;
+  1066→  1066→        }
+  1067→  1067→
+  1068→  1068→        if (p.pierceLeft > 0) {
+  1069→  1069→          p.pierceLeft--;
+  1070→  1070→        } else if (p.ricochetLeft && p.ricochetLeft > 0) {
+  1071→  1071→          // ===== Ricochet: redirect arrow to nearest alive enemy instead of destroying =====
+  1072→  1072→          let nearest: Enemy | null = null;
+  1073→  1073→          let nearestDist = GAME_CONFIG.ricochet.searchRadius;
+  1074→  1074→          for (let j = 0; j < s.enemies.length; j++) {
+  1075→  1075→            if (deadEnemies.includes(j)) continue;
+  1076→  1076→            if (p.hitEnemies.includes(j)) continue;
+  1077→  1077→            const ne = s.enemies[j];
+  1078→  1078→            const ndx = ne.x - p.x;
+  1079→  1079→            const ndy = ne.y - p.y;
+  1080→  1080→            const nd = Math.sqrt(ndx * ndx + ndy * ndy);
+  1081→  1081→            if (nd < nearestDist) {
+  1082→  1082→              nearestDist = nd;
+  1083→  1083→              nearest = ne;
+  1084→  1084→            }
+  1085→  1085→          }
+  1086→  1086→          if (nearest && nearestDist < GAME_CONFIG.ricochet.searchRadius) {
+  1087→  1087→            const ndx = nearest.x - p.x;
+  1088→  1088→            const ndy = nearest.y - p.y;
+  1089→  1089→            const nd = Math.sqrt(ndx * ndx + ndy * ndy);
+  1090→  1090→            if (nd > 0) {
+  1091→  1091→              const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy) * GAME_CONFIG.ricochet.speedRetention;
+  1092→  1092→              p.vx = (ndx / nd) * speed;
+  1093→  1093→              p.vy = (ndy / nd) * speed;
+  1094→  1094→              p.ricochetLeft--;
+  1095→  1095→              spawnParticles(s, p.x, p.y, '#ffffff', 4);
+  1096→  1096→            }
+  1097→  1097→          } else {
+  1098→  1098→            s.projectiles.splice(pi, 1);
+  1099→  1099→            break;
+  1100→  1100→          }
+  1101→  1101→        } else {
+  1102→  1102→          s.projectiles.splice(pi, 1);
+  1103→  1103→          break; // Stop checking this projectile
+  1104→  1104→        }
+  1105→  1105→      }
+  1106→  1106→    }
+  1107→  1107→  }
+  1108→  1108→}
+  1109→  1109→
+  1110→  1110→export function tickCleanup(s: InternalGameState, W: number, H: number, deadEnemies: number[]) {
+  1111→  1111→  const uniqueDead = [...new Set(deadEnemies)].sort((a, b) => b - a);
+  1112→  1112→  uniqueDead.forEach(i => s.enemies.splice(i, 1));
+  1113→  1113→
+  1114→  1114→  s.projectiles = s.projectiles.filter(p => {
+  1115→  1115→    if (!p.trail) p.trail = [];
+  1116→  1116→    p.trail.push({ x: p.x, y: p.y });
+  1117→  1117→    if (p.trail.length > 10) p.trail.shift();
+  1118→  1118→
+  1119→  1119→    // Magnet arrow: gently steer toward the nearest alive enemy within range.
+  1120→  1120→    // Skip enemies already hit (hitEnemies) so the arrow keeps flying toward
+  1121→  1121→    // a NEW target after piercing, instead of getting stuck on the one it hit.
+  1122→  1122→    if (p.isMagnet) {
+  1123→  1123→      let nearest: Enemy | null = null;
+  1124→  1124→      let nearestDist = GAME_CONFIG.magnet.range;
+  1125→  1125→      for (let i = 0; i < s.enemies.length; i++) {
+  1126→  1126→        if (uniqueDead.includes(i)) continue;
+  1127→  1127→        if (p.hitEnemies.includes(i)) continue; // skip already-hit enemies
+  1128→  1128→        const e = s.enemies[i];
+  1129→  1129→        const ddx = e.x - p.x;
+  1130→  1130→        const ddy = e.y - p.y;
+  1131→  1131→        const d = Math.sqrt(ddx * ddx + ddy * ddy);
+  1132→  1132→        if (d < nearestDist) {
+  1133→  1133→          nearestDist = d;
+  1134→  1134→          nearest = e;
+  1135→  1135→        }
+  1136→  1136→      }
+  1137→  1137→      if (nearest) {
+  1138→  1138→        const tdx = nearest.x - p.x;
+  1139→  1139→        const tdy = nearest.y - p.y;
+  1140→  1140→        const td = Math.sqrt(tdx * tdx + tdy * tdy);
+  1141→  1141→        if (td > 0) {
+  1142→  1142→          const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+  1143→  1143→          const targetVx = (tdx / td) * speed;
+  1144→  1144→          const targetVy = (tdy / td) * speed;
+  1145→  1145→          const steer = GAME_CONFIG.magnet.steerStrength;
+  1146→  1146→          p.vx = p.vx * (1 - steer) + targetVx * steer;
+  1147→  1147→          p.vy = p.vy * (1 - steer) + targetVy * steer;
+  1148→  1148→        }
+  1149→  1149→      }
+  1150→  1150→    }
+  1151→  1151→
+  1152→  1152→    // Mini black holes absorb nearby arrows
+  1153→  1153→    for (let mi = 0; mi < s.miniBlackHoles.length; mi++) {
+  1154→  1154→      const mbh = s.miniBlackHoles[mi];
+  1155→  1155→      const dx = mbh.x - p.x;
+  1156→  1156→      const dy = mbh.y - p.y;
+  1157→  1157→      const d = Math.sqrt(dx * dx + dy * dy);
+  1158→  1158→      if (d < mbh.radius) {
+  1159→  1159→        // Arrow is inside the black hole — destroy it
+  1160→  1160→        spawnParticles(s, p.x, p.y, '#bf00ff', 6);
+  1161→  1161→        return false;
+  1162→  1162→      }
+  1163→  1163→      if (d < mbh.absorbRadius) {
+  1164→  1164→        // Pull arrow toward the black hole
+  1165→  1165→        const pull = 0.5 * (1 - d / mbh.absorbRadius);
+  1166→  1166→        p.vx += (dx / d) * pull;
+  1167→  1167→        p.vy += (dy / d) * pull;
+  1168→  1168→      }
+  1169→  1169→    }
+  1170→  1170→
+  1171→  1171→    p.x += p.vx;
+  1172→  1172→    p.y += p.vy;
+  1173→  1173→    return p.x > -50 && p.x < W + 50 && p.y > -50 && p.y < H + 50;
+  1174→  1174→  });
+  1175→  1175→
+  1176→  1176→  s.particles = s.particles.filter(p => {
+  1177→  1177→    p.x += p.vx;
+  1178→  1178→    p.y += p.vy;
+  1179→  1179→    p.vx *= 0.95;
+  1180→  1180→    p.vy *= 0.95;
+  1181→  1181→    p.life--;
+  1182→  1182→    return p.life > 0;
+  1183→  1183→  });
+  1184→  1184→
+  1185→  1185→  // Update active shockwaves (expand ring, decrease life)
+  1186→  1186→  s.activeShockwaves = s.activeShockwaves.filter(sw => {
+  1187→  1187→    sw.life--;
+  1188→  1188→    const t = 1 - sw.life / sw.maxLife;
+  1189→  1189→    sw.radius = 25 + (sw.maxRadius - 25) * t;
+  1190→  1190→    return sw.life > 0;
+  1191→  1191→  });
+  1192→  1192→}
+  1193→  1193→
+  1194→  1194→// ===== Boss-mode ambient dust particles =====
+  1195→  1195→// Dust drifts slowly across the screen. When the boss is present, each dust particle
+  1196→  1196→// is gravitationally pulled toward it — the closer it gets, the stronger the pull.
+  1197→  1197→// Near the boss, particles spiral around it (orbit) before being absorbed completely.
+  1198→  1198→
+  1199→  1199→const DUST_COUNT = 90;            // target dust population
+  1200→  1200→const DUST_ABSORB_RADIUS = 40;    // absorbed when within this of boss center
+  1201→  1201→const DUST_SPIRAL_RADIUS = 140;   // start spiraling when within this
+  1202→  1202→const DUST_GRAVITY_RANGE = 600;   // only attracted if within this distance
+  1203→  1203→const DUST_DRIFT_SPEED = 0.25;    // baseline drift speed
+  1204→  1204→
+  1205→  1205→export function initDustParticles(s: InternalGameState, W: number, H: number) {
+  1206→  1206→  s.dustParticles = [];
+  1207→  1207→  for (let i = 0; i < DUST_COUNT; i++) {
+  1208→  1208→    s.dustParticles.push(createDust(W, H));
+  1209→  1209→  }
+  1210→  1210→}
+  1211→  1211→
+  1212→  1212→function createDust(W: number, H: number): DustParticle {
+  1213→  1213→  const baseAlpha = 0.15 + Math.random() * 0.25; // very faint
+  1214→  1214→  return {
+  1215→  1215→    x: Math.random() * W,
+  1216→  1216→    y: Math.random() * H,
+  1217→  1217→    vx: (Math.random() - 0.5) * DUST_DRIFT_SPEED,
+  1218→  1218→    vy: (Math.random() - 0.5) * DUST_DRIFT_SPEED,
+  1219→  1219→    radius: 0.6 + Math.random() * 1.4,
+  1220→  1220→    baseAlpha,
+  1221→  1221→    alpha: baseAlpha,
+  1222→  1222→    orbitAngle: Math.random() * Math.PI * 2,
+  1223→  1223→    absorbed: false,
+  1224→  1224→    absorbProgress: 0,
+  1225→  1225→  };
+  1226→  1226→}
+  1227→  1227→
+  1228→  1228→export function tickDustParticles(s: InternalGameState, W: number, H: number) {
+  1229→  1229→  // Find the boss (only one exists in boss mode)
+  1230→  1230→  const boss = s.enemies.find(e => e.id === 'boss_omega');
+  1231→  1231→  const bx = boss ? boss.x : -9999;
+  1232→  1232→  const by = boss ? boss.y : -9999;
+  1233→  1233→  const bossR = boss ? boss.radius : 0;
+  1234→  1234→
+  1235→  1235→  for (let i = 0; i < s.dustParticles.length; i++) {
+  1236→  1236→    const d = s.dustParticles[i];
+  1237→  1237→
+  1238→  1238→    if (d.absorbed) {
+  1239→  1239→      // Continue the absorb animation: spiral tighter & fade, then respawn elsewhere
+  1240→  1240→      d.absorbProgress += 0.06;
+  1241→  1241→      d.alpha = d.baseAlpha * (1 - d.absorbProgress);
+  1242→  1242→      if (d.absorbProgress >= 1) {
+  1243→  1243→        // Respawn at a random screen edge far from the boss
+  1244→  1244→        s.dustParticles[i] = createDust(W, H);
+  1245→  1245→        const nd = s.dustParticles[i];
+  1246→  1246→        // spawn near an edge
+  1247→  1247→        const edge = Math.floor(Math.random() * 4);
+  1248→  1248→        if (edge === 0) { nd.x = Math.random() * W; nd.y = -10; }
+  1249→  1249→        else if (edge === 1) { nd.x = W + 10; nd.y = Math.random() * H; }
+  1250→  1250→        else if (edge === 2) { nd.x = Math.random() * W; nd.y = H + 10; }
+  1251→  1251→        else { nd.x = -10; nd.y = Math.random() * H; }
+  1252→  1252→      }
+  1253→  1253→      continue;
+  1254→  1254→    }
+  1255→  1255→
+  1256→  1256→    if (boss) {
+  1257→  1257→      const dx = bx - d.x;
+  1258→  1258→      const dy = by - d.y;
+  1259→  1259→      const dist = Math.sqrt(dx * dx + dy * dy);
+  1260→  1260→
+  1261→  1261→      if (dist < DUST_ABSORB_RADIUS + bossR * 0.5) {
+  1262→  1262→        // Close enough → start absorption
+  1263→  1263→        d.absorbed = true;
+  1264→  1264→        d.absorbProgress = 0;
+  1265→  1265→        d.orbitAngle = Math.atan2(dy, dx);
+  1266→  1266→        continue;
+  1267→  1267→      }
+  1268→  1268→
+  1269→  1269→      if (dist < DUST_GRAVITY_RANGE) {
+  1270→  1270→        // Gravitational pull — strength increases as distance decreases (1/dist falloff).
+  1271→  1271→        // Normalized so pull is gentle far away and strong up close.
+  1272→  1272→        const proximity = 1 - dist / DUST_GRAVITY_RANGE; // 0 (far) → 1 (close)
+  1273→  1273→        const pullStrength = 0.04 + proximity * proximity * 1.4; // quadratic ramp
+  1274→  1274→
+  1275→  1275→        // Direction toward boss
+  1276→  1276→        const ndx = dx / dist;
+  1277→  1277→        const ndy = dy / dist;
+  1278→  1278→
+  1279→  1279→        // Within spiral radius, add tangential velocity for orbiting swirl
+  1280→  1280→        if (dist < DUST_SPIRAL_RADIUS) {
+  1281→  1281→          d.orbitAngle += 0.12 * (1 - dist / DUST_SPIRAL_RADIUS); // spin faster when closer
+  1282→  1282→          const swirlStrength = (1 - dist / DUST_SPIRAL_RADIUS) * 1.2;
+  1283→  1283→          // tangential vector (perpendicular to radial, counterclockwise)
+  1284→  1284→          const tx = -ndy;
+  1285→  1285→          const ty = ndx;
+  1286→  1286→          d.vx += ndx * pullStrength + tx * swirlStrength;
+  1287→  1287→          d.vy += ndy * pullStrength + ty * swirlStrength;
+  1288→  1288→          // brighten slightly as it swirls
+  1289→  1289→          d.alpha = Math.min(0.7, d.baseAlpha + proximity * 0.4);
+  1290→  1290→        } else {
+  1291→  1291→          // Pure attraction outside spiral radius
+  1292→  1292→          d.vx += ndx * pullStrength;
+  1293→  1293→          d.vy += ndy * pullStrength;
+  1294→  1294→          d.alpha = d.baseAlpha + proximity * 0.15;
+  1295→  1295→        }
+  1296→  1296→
+  1297→  1297→        // Damp excess velocity to keep movement smooth (cap speed)
+  1298→  1298→        const speed = Math.sqrt(d.vx * d.vx + d.vy * d.vy);
+  1299→  1299→        const maxSpeed = 4 + proximity * 6;
+  1300→  1300→        if (speed > maxSpeed) {
+  1301→  1301→          d.vx = (d.vx / speed) * maxSpeed;
+  1302→  1302→          d.vy = (d.vy / speed) * maxSpeed;
+  1303→  1303→        }
+  1304→  1304→      } else {
+  1305→  1305→        // Far from boss: gentle ambient drift, no attraction
+  1306→  1306→        d.vx += (Math.random() - 0.5) * 0.01;
+  1307→  1307→        d.vy += (Math.random() - 0.5) * 0.01;
+  1308→  1308→        d.alpha = d.baseAlpha;
+  1309→  1309→      }
+  1310→  1310→    } else {
+  1311→  1311→      // No boss present: gentle ambient drift
+  1312→  1312→      d.vx += (Math.random() - 0.5) * 0.01;
+  1313→  1313→      d.vy += (Math.random() - 0.5) * 0.01;
+  1314→  1314→      d.alpha = d.baseAlpha;
+  1315→  1315→    }
+  1316→  1316→
+  1317→  1317→    // Apply velocity
+  1318→  1318→    d.x += d.vx;
+  1319→  1319→    d.y += d.vy;
+  1320→  1320→
+  1321→  1321→    // Mild damping for smooth motion
+  1322→  1322→    d.vx *= 0.97;
+  1323→  1323→    d.vy *= 0.97;
+  1324→  1324→
+  1325→  1325→    // Wrap around screen edges (only when not being attracted — keeps dust on-screen)
+  1326→  1326→    if (!boss || Math.hypot(bx - d.x, by - d.y) > DUST_GRAVITY_RANGE) {
+  1327→  1327→      if (d.x < -20) d.x = W + 20;
+  1328→  1328→      if (d.x > W + 20) d.x = -20;
+  1329→  1329→      if (d.y < -20) d.y = H + 20;
+  1330→  1330→      if (d.y > H + 20) d.y = -20;
+  1331→  1331→    }
+  1332→  1332→  }
+  1333→  1333→
+  1334→  1334→  // Keep population topped up
+  1335→  1335→  while (s.dustParticles.length < DUST_COUNT) {
+  1336→  1336→    s.dustParticles.push(createDust(W, H));
+  1337→  1337→  }
+  1338→  1338→}
+  1339→  1339→
+  1340→  1340→export function shootProjectile(
+  1341→  1341→  s: InternalGameState,
+  1342→  1342→  cx: number,
+  1343→  1343→  cy: number,
+  1344→  1344→  mouseX: number,
+  1345→  1345→  mouseY: number,
+  1346→  1346→  emitState: () => void,
+  1347→  1347→) {
+  1348→  1348→  if (!s.alive || s.reloading || s.arrows <= 0 || s.shootCooldown > 0) return;
+  1349→  1349→  const dx = mouseX - cx;
+  1350→  1350→  const dy = mouseY - cy;
+  1351→  1351→  const dist = Math.sqrt(dx * dx + dy * dy);
+  1352→  1352→  if (dist === 0) return;
+  1353→  1353→  const speed = GAME_CONFIG.player.projectileSpeed * s.projSpeedMult;
+  1354→  1354→
+  1355→  1355→  // ===== Overcharge: every Nth shot is empowered (×1.5 dmg + forced crit) =====
+  1356→  1356→  let isEmpowered = false;
+  1357→  1357→  let isCrit = Math.random() < s.critChance;
+  1358→  1358→  if (s.overcharge > 0) {
+  1359→  1359→    s.overchargeCounter++;
+  1360→  1360→    const interval = Math.max(2, GAME_CONFIG.overcharge.baseInterval - s.overcharge);
+  1361→  1361→    if (s.overchargeCounter >= interval) {
+  1362→  1362→      s.overchargeCounter = 0;
+  1363→  1363→      isEmpowered = true;
+  1364→  1364→      if (GAME_CONFIG.overcharge.forceCrit) isCrit = true;
+  1365→  1365→    }
+  1366→  1366→  }
+  1367→  1367→
+  1368→  1368→  let damage = s.damageMult * (isCrit ? s.critDamage : 1);
+  1369→  1369→  if (isEmpowered) damage *= GAME_CONFIG.overcharge.damageMult;
+  1370→  1370→
+  1371→  1371→  // The last arrow in the quiver becomes a magnet arrow if the upgrade is purchased
+  1372→  1372→  const isMagnet = s.magnetArrow > 0 && s.arrows === 1;
+  1373→  1373→
+  1374→  1374→  // Ricochet charges — set on each arrow so multiple shots benefit
+  1375→  1375→  const ricochetLeft = s.ricochet * GAME_CONFIG.ricochet.bouncesPerLevel;
+  1376→  1376→
+  1377→  1377→  // Helper to push a single arrow projectile
+  1378→  1378→  const pushArrow = (vx: number, vy: number, opts: Partial<Projectile> = {}) => {
+  1379→  1379→    s.projectiles.push({
+  1380→  1380→      x: cx, y: cy,
+  1381→  1381→      vx, vy,
+  1382→  1382→      radius: GAME_CONFIG.player.projectileRadius,
+  1383→  1383→      trail: [],
+  1384→  1384→      pierceLeft: s.piercingVal,
+  1385→  1385→      hitEnemies: [],
+  1386→  1386→      damage,
+  1387→  1387→      isCrit,
+  1388→  1388→      isMagnet,
+  1389→  1389→      ricochetLeft,
+  1390→  1390→      isEmpowered,
+  1391→  1391→      ...opts,
+  1392→  1392→    });
+  1393→  1393→  };
+  1394→  1394→
+  1395→  1395→  pushArrow((dx / dist) * speed, (dy / dist) * speed);
+  1396→  1396→
+  1397→  1397→  // ===== Multishot: chance to fire extra arrows in a spread =====
+  1398→  1398→  if (s.multishot > 0 && Math.random() < s.multishot * GAME_CONFIG.multishot.chancePerLevel) {
+  1399→  1399→    const spread = (GAME_CONFIG.multishot.spreadDeg * Math.PI) / 180;
+  1400→  1400→    const baseAngle = Math.atan2(dy, dx);
+  1401→  1401→    const extra = GAME_CONFIG.multishot.extraArrows;
+  1402→  1402→    for (let k = 1; k <= extra; k++) {
+  1403→  1403→      const sign = k % 2 === 1 ? 1 : -1;
+  1404→  1404→      const offset = Math.ceil(k / 2) * spread;
+  1405→  1405→      const ang = baseAngle + sign * offset;
+  1406→  1406→      // Extra arrows aren't magnet arrows
+  1407→  1407→      pushArrow(Math.cos(ang) * speed, Math.sin(ang) * speed, { isMagnet: false });
+  1408→  1408→    }
+  1409→  1409→    spawnParticles(s, cx, cy, '#ff006e', 8);
+  1410→  1410→  }
+  1411→  1411→
+  1412→  1412→  audio.playShoot();
+  1413→  1413→  s.arrows--;
+  1414→  1414→  s.shootCooldown = GAME_CONFIG.player.shootCooldownFrames;
+  1415→  1415→  s.bowPulse = 15;
+  1416→  1416→  if (s.arrows <= 0) {
+  1417→  1417→    s.reloading = true;
+  1418→  1418→    s.reloadTimer = s.reloadFrames;
+  1419→  1419→    s.reloadProgress = 0;
+  1420→  1420→  }
+  1421→  1421→  emitState();
+  1422→  1422→}

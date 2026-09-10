@@ -1,0 +1,474 @@
+     1→# SPACE ARCHER — i18n Work Log
+     2→
+     3→Этот файл отслеживает работу над добавлением переключателя языков.
+     4→
+     5→---
+     6→Task ID: 0
+     7→Agent: main
+     8→Task: Build i18n infrastructure + write RU (source) and EN translation files
+     9→
+    10→Work Log:
+    11→- Created /home/z/my-project/src/i18n/types.ts (Lang type, LanguageMeta, LANGUAGES registry, TFn)
+    12→- Created /home/z/my-project/src/i18n/ru.ts — Russian source of truth (~280 keys, dot-notation)
+    13→- Created /home/z/my-project/src/i18n/en.ts — English translation (same keys)
+    14→- Key namespaces: common, auth, menu, game, settings, help, upgrades, leaderboard, profile, admin, enemy
+    15→
+    16→Stage Summary:
+    17→- Source-of-truth key structure is FINALIZED in ru.ts.
+    18→- All language files (zh/es/ar/de/fr) MUST export a `Translation` object with EXACTLY the same keys as ru.ts.
+    19→- Placeholder convention: {name}, {score}, {wave}, {count}, {pct}, {total}, {max}, {acquired}, {levels}, {unlocked} — replaced at runtime by t(key, params).
+    20→
+    21→---
+    22→Task ID: 7-e
+    23→Agent: general-purpose (French translator)
+    24→Task: Write French translation file matching ru.ts keys
+    25→
+    26→Work Log:
+    27→- Read /home/z/my-project/worklog.md, ru.ts (source of truth) and en.ts (reference).
+    28→- Created /home/z/my-project/src/i18n/fr.ts with all keys from ru.ts (324 keys) translated into natural French.
+    29→- Verified via ripgrep that the 324 keys in fr.ts match ru.ts byte-for-byte (no missing/extra keys).
+    30→- Verified all runtime placeholders ({name}, {wave}, {pct}, {total}, {max}, {acquired}, {levels}, {unlocked}) are preserved exactly; the {count}/{score} matches in ru.ts appear only in the comment header, not in values.
+    31→- Kept all emojis/symbols (←, ↺, ▶, ·, ×, −, —, 🌌, 🔥, ⚙, ⚡, 🏆, 🛡️, 🎮, 🎯, 👾, 💾, ?) verbatim.
+    32→- Preserved email natalya.atamankina1@yandex.ru verbatim in auth.hintRegister.
+    33→- HUD chips translated: Vitalité / Score / Noyaux / Vague.
+    34→- `upgrades.value.hpPerSec` = 'PV/s', `upgrades.value.chanceX2` = 'chance ×2'.
+    35→- Uppercase button labels kept UPPERCASE in French (e.g. 'LANCER LA PARTIE', 'RETOUR', 'PAUSE').
+    36→- `admin.roleUser` = 'USER', `admin.roleAdmin` = 'ADMIN' (kept English identifiers).
+    37→- `profile.lvl` = 'NIV'.
+    38→- Boss Omega name → 'Omega' (enemy.boss_omega.name).
+    39→
+    40→Stage Summary:
+    41→- Artifact: /home/z/my-project/src/i18n/fr.ts (324 keys, ~370 lines) — full French translation exporting `fr: Translation`.
+    42→- Terminology choices: arc=arc, flèche(s), ennemi(s), vague, PV (points de vie), noyaux cosmiques, amélioration, carquois, rechargement, perforation, (chance/dégâts) critiques, armure (défense), régénération, onde de choc, aimant.
+    43→- Follows types.ts Translation contract; ready to be registered in LANGUAGES (fr entry).
+    44→
+    45→---
+    46→Task ID: 7-a
+    47→Agent: general-purpose (Chinese translator)
+    48→Task: Write Simplified Chinese translation file matching ru.ts keys
+    49→
+    50→Work Log:
+    51→- Read /home/z/my-project/worklog.md to understand prior i18n scaffolding work
+    52→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, 324 keys) and /home/z/my-project/src/i18n/en.ts (English reference)
+    53→- Read /home/z/my-project/src/i18n/types.ts to confirm Lang type already includes 'zh' and LANGUAGES registry already declares 简体中文 (bcp47 'zh-Hans', dir 'ltr', flag 🇨🇳)
+    54→- Created /home/z/my-project/src/i18n/zh.ts with `export const zh: Translation = {...}` containing all 324 keys byte-for-byte identical to ru.ts
+    55→- Translated every value into natural Simplified Chinese game UI copy:
+    56→  * Terminology: 弓=bow, 箭=arrow, 敌人=enemy, 波次=wave, 生命值=HP, 分数=score, 宇宙核心=cosmic cores, 升级/强化=upgrade, BOSS/首领=boss, 箭袋=quiver, 装填=reload, 穿透=piercing, 暴击=critical, 护甲=defense, 生命回复=regeneration, 冲击波=shockwave, 磁力=magnet
+    57→  * HUD chips translated per recommendation: 生命/分数/核心/波次
+    58→  * Preserved all {braces} placeholders, emojis (🌌🔥⚙⚡🏆⚠️▶↺←🛡️⚔️🏹☄️🌪️🎯💥💖🦾💎✨🧲⭐👑🌟🎮🏅🎖️💫💰🔧📊💀🔋🥉🥈🥇👹🌊 etc.) and arrows (← ↺ ▶ · × − —)
+    59→  * Preserved special-case values verbatim: 'Omega' for enemy.boss_omega.name, 'USER'/'ADMIN' for admin roles, 'LVL' for profile.lvl, email natalya.atamankina1@yandex.ru
+    60→  * Used exact required values: upgrades.value.hpPerSec='HP/秒', upgrades.value.chanceX2='×2 概率'
+    61→- Verified with Python regex: 324 keys in zh.ts == 324 keys in ru.ts (zero diff); 7 keys with placeholders ({name}/{wave}/{acquired}/{total}/{levels}/{max}/{unlocked}/{pct}) all preserved exactly
+    62→
+    63→Stage Summary:
+    64→- Artifact: /home/z/my-project/src/i18n/zh.ts (324 keys, byte-for-byte key parity with ru.ts/en.ts)
+    65→- No code wiring required — types.ts already declares 'zh' in Lang and in LANGUAGES registry; zh.ts is standalone and ready for the future LanguageContext consumer to import.
+    66→- All placeholders, emojis, arrows, and special-case strings (Omega, USER/ADMIN, LVL, admin email) preserved verbatim per task spec.
+    67→
+    68→---
+    69→Task ID: 7-d
+    70→Agent: general-purpose (German translator)
+    71→Task: Write German translation file matching ru.ts keys
+    72→
+    73→Work Log:
+    74→- Read /home/z/my-project/worklog.md to understand prior i18n infrastructure work
+    75→- Read source files ru.ts (source of truth), en.ts (English reference), types.ts (Translation type + LANGUAGES registry)
+    76→- Created /home/z/my-project/src/i18n/de.ts exporting `de: Translation` with every key from ru.ts, byte-for-byte identical
+    77→- Translated all 324 keys to natural, idiomatic German while preserving all `{placeholders}` (e.g. `{pct}%`, `{name}`, `{acquired}/{total}`, `{unlocked}/{total}`, `{levels}/{max}`, `{wave}`) and emojis (← ↺ ▶ ⚙ ⚡ 🏆 🌌 🔥 🛡️ ⚔️ 🎯 👾 🛡️ 💾 ⚙ 🎮 🏅 🎖️ 💫 💰 🔧 📊 💀 🔋 🥉 🥈 🥇 👹 🌊 etc.) and the minus/long-dash chars (−, —)
+    78→- Verified key parity by extracting and diffing keys from ru.ts and de.ts → KEYS_MATCH_OK
+    79→- Verified placeholder parity by regex-extracting placeholders from value strings in both files → identical (8 placeholder kinds, same counts)
+    80→- Verified TypeScript compilation with `bunx tsc --noEmit src/i18n/de.ts` → clean (no output)
+    81→
+    82→Stage Summary:
+    83→- Artifact: /home/z/my-project/src/i18n/de.ts (324 keys, ~250 lines incl. comments)
+    84→- Terminology decisions: bow=Bogen, arrow=Pfeil, enemy=Gegner, wave=Welle, HP→LP (Lebenspunkte) for `hpPerSec` label, cores=Kerne (kosmische Kerne full form), upgrade=Upgrade, boss=Boss, quiver=Köcher, reload=Nachladen, piercing=Durchschlag, critical=Krit., defense/armor=Rüstung, regeneration=Regeneration, shockwave=Schockwelle, magnet=Magnet, boss Omega=Omega
+    85→- HUD chips localized per spec: Vitalität / Punkte / Kerne / Welle
+    86→- ALL-CAPS button labels kept uppercase in German (e.g. 'SPIEL STARTEN', 'ABMELDEN', 'ZUGRIFF VERWEIGERT')
+    87→- Number formatting follows German convention (1.000, 5.000, 10.000, 50.000 instead of comma thousands)
+    88→- `admin.roleUser`='USER', `admin.roleAdmin`='ADMIN' kept as English role identifiers
+    89→- `profile.lvl`='LVL' kept as per spec
+    90→- Email natalya.atamankina1@yandex.ru preserved verbatim in `auth.hintRegister`
+    91→- German quotation marks „…“ used in upgrade-name references inside achievement descriptions (e.g. „Mini-Magnet“-Upgrade)
+    92→
+    93→---
+    94→Task ID: 7-b
+    95→Agent: general-purpose (Spanish translator)
+    96→Task: Write Spanish translation file matching ru.ts keys
+    97→
+    98→Work Log:
+    99→- Read /home/z/my-project/worklog.md to understand prior i18n infrastructure (Tasks 0, 7-a/7-d/7-e already done for zh/de/fr).
+   100→- Read source files: ru.ts (source of truth, 324 keys), en.ts (English reference), types.ts (Translation contract).
+   101→- Created /home/z/my-project/src/i18n/es.ts exporting `es: Translation` with every key from ru.ts, byte-for-byte identical.
+   102→- Translated all 324 values to natural, idiomatic neutral Spanish (understandable across LatAm and Spain).
+   103→- Verified key parity via ripgrep: extracted 324 keys from ru.ts and 324 keys from es.ts, sorted and diffed → zero missing/extra keys.
+   104→- Verified runtime placeholder parity: ru.ts and es.ts both use the same 8 placeholder kinds in values ({name}, {wave}, {pct}, {total}, {max}, {acquired}, {levels}, {unlocked}); the {count}/{score} tokens in ru.ts appear only inside the JSDoc header comment, not in any value, so es.ts is consistent.
+   105→- Preserved all emojis/symbols verbatim (← ↺ ▶ · × − — 🌌 🔥 ⚙ ⚡ 🏆 ⚠️ 🛡️ 🎮 🎯 👾 💾 ⚙ 🏅 etc.).
+   106→- Preserved email natalya.atamankina1@yandex.ru verbatim in `auth.hintRegister`.
+   107→- HUD chips translated per spec: Vitalidad / Puntos / Núcleos / Oleada.
+   108→- `upgrades.value.hpPerSec` = 'VID/s', `upgrades.value.chanceX2` = 'probabilidad ×2'.
+   109→- Uppercase button labels kept UPPERCASE in Spanish (e.g. 'INICIAR PARTIDA', 'VOLVER', 'PAUSA', 'GUARDAR RÉCORD').
+   110→- `admin.roleUser` = 'USER', `admin.roleAdmin` = 'ADMIN' (kept English identifiers).
+   111→- `profile.lvl` = 'NIV'.
+   112→- Boss name `enemy.boss_omega.name` = 'Omega'; achievement `boss_slayer.desc` uses 'jefe Omega'.
+   113→- Spanish guillemets «…» used in achievement descriptions referencing upgrade names (e.g. «Mini Imán», «Onda de Choque», «Núcleos Dobles»).
+   114→- Ran `npx tsc --noEmit src/i18n/es.ts` → no errors emitted.
+   115→
+   116→Stage Summary:
+   117→- Artifact: /home/z/my-project/src/i18n/es.ts (324 keys, ~290 lines incl. comments) — full Spanish translation exporting `es: Translation`, ready to be registered in LANGUAGES (es entry).
+   118→- Terminology choices: bow=arco, arrow=flecha, enemy=enemigo, wave=oleada, HP→VID (in HUD/stat labels) and HP kept in numeric upgrade descriptions where appropriate, score=puntos, cores=núcleos cósmicos, upgrade=mejora, boss=jefe, quiver=carcaj, reload=recarga, piercing=perforación, critical=crítico, defense/armor=blindaje, regeneration=regeneración, shockwave=onda de choque, magnet=imán, boss Omega=Omega.
+   119→- Neutral Spanish ("ratón" for mouse, "oleada" for wave, "partida" for game session) — universally understood.
+   120→- Number formatting: 5.000 / 10.000 / 50.000 (Spanish thousands separator) — matches LatAm/Spain convention.
+   121→- Follows types.ts Translation contract; consistent terminology across HUD, upgrades tree, stats tab, achievements, admin panel, and enemy codex.
+   122→
+   123→---
+   124→Task ID: 7-c
+   125→Agent: general-purpose (Arabic translator)
+   126→Task: Write Arabic translation file matching ru.ts keys
+   127→
+   128→Work Log:
+   129→- Read /home/z/my-project/worklog.md to understand prior i18n infrastructure and sibling tasks (7-a zh, 7-d de, 7-e fr).
+   130→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, 324 keys) and /home/z/my-project/src/i18n/en.ts (English reference).
+   131→- Read /home/z/my-project/src/i18n/types.ts — confirms 'ar' is in Lang and LANGUAGES registry already declares العربية (bcp47 'ar', dir 'rtl', flag 🇸🇦).
+   132→- Created /home/z/my-project/src/i18n/ar.ts exporting `ar: Translation` with all 324 keys byte-for-byte identical to ru.ts.
+   133→- Translated every value into natural Modern Standard Arabic (الفصحى) game UI copy:
+   134→  * Terminology: قوس=bow, سهم=arrow, عدو=enemy, موجة=wave, الصحة=HP, النقاط=score, النوى الكونية=cosmic cores, ترقية=upgrade, الزعيم=boss, كنانة=quiver, إعادة التحميل=reload, اختراق=piercing, حرج=critical, دفاع=defense, تجدد=regeneration, موجة صدمية=shockwave, مغناطيس=magnet.
+   135→  * HUD chips translated per spec: الحيوية / النقاط / النوى / الموجة.
+   136→  * Preserved all `{placeholders}` ({name}, {wave}, {pct}, {total}, {max}, {acquired}, {levels}, {unlocked}) verbatim.
+   137→  * Preserved all emojis (← ↺ ▶ · × − — 🌌 🔥 ⚙ ⚡ 🏆 🛡️ 🎮 🎯 👾 💾) and arrow/symbol characters exactly.
+   138→  * Email natalya.atamankina1@yandex.ru preserved verbatim in auth.hintRegister.
+   139→  * `enemy.boss_omega.name` = 'أوميغا' (transliteration per spec).
+   140→  * `admin.roleUser`='USER', `admin.roleAdmin`='ADMIN' kept as English role identifiers.
+   141→  * `profile.lvl`='المستوى' (Arabic, per spec).
+   142→  * `upgrades.value.hpPerSec`='صحة/ث' and `upgrades.value.chanceX2`='احتمال ×2' (per spec).
+   143→- RTL note documented in file header — Arabic strings only; LanguageContext sets `<html dir="rtl">`; Latin tokens (USER/ADMIN/Omega/email/numbers/×2) display correctly inline via bidi algorithm.
+   144→- Verified with ripgrep: extracted keys from ru.ts and ar.ts, sorted, diffed → ✅ 324 keys match byte-for-byte (no missing/extra/renamed).
+   145→- Verified all 10 placeholder kinds ({name}, {wave}, {count}, {pct}, {total}, {max}, {acquired}, {levels}, {unlocked}, {score}) present in comment headers and value strings identically.
+   146→- Verified special characters: × (4 in value strings), − U+2212 (2 occurrences), ← (3), ↺ (1), ▶ (3) — all match ru.ts.
+   147→- Verified TypeScript compilation with `npx tsc --noEmit src/i18n/ar.ts src/i18n/ru.ts src/i18n/en.ts src/i18n/types.ts` → exit 0, no errors.
+   148→
+   149→Stage Summary:
+   150→- Artifact: /home/z/my-project/src/i18n/ar.ts (324 keys, ~390 lines incl. comments) — full Modern Standard Arabic translation exporting `ar: Translation`.
+   151→- No code wiring required — types.ts already declares 'ar' in Lang and in LANGUAGES registry; ar.ts is standalone and ready for the future LanguageContext consumer to import.
+   152→- All placeholders, emojis, arrows, and special-case strings (Omega→أوميغا, USER/ADMIN, natalya.atamankina1@yandex.ru) preserved verbatim per task spec.
+   153→- Achievement/enemy names transliterated or semantically translated where no direct Arabic equivalent (e.g. berserker→الهائج, juggernaut→الجبّار, necromancer→ساحر الموتى, phantom→الطيف).
+   154→
+   155→---
+   156→Task ID: 8
+   157→Agent: main
+   158→Task: Add 15 new unique upgrades to the tree + extend i18n keys (RU done; dispatch translations)
+   159→
+   160→Work Log:
+   161→- Added 15 new upgrades to GameProgress['upgrades'] type: ricochet, multishot, overcharge, executioner (attack); critLethal, critLeech (crit); thorns, shieldBattery, lastStand (defense); coreMagnet, scoreBoost, jackpot (economy); timeWarp, phoenix, arrowStorm (elite).
+   162→- Extended GAME_CONFIG with per-upgrade tuning constants + maxLevels entries for all 15.
+   163→- Added new fields to InternalGameState (ricochet/multishot/overcharge/overchargeCounter/executioner/critLethal/critLeech/thorns/shieldBattery/shieldBatteryCharges/shieldBatteryTimer/lastStand/coreMagnet/scoreBoost/jackpot/bonusCoresAccumulated/timeWarp/timeWarpActive/timeWarpTimer/phoenix/phoenixUsed/arrowStorm/arrowStormTimer).
+   164→- Added Projectile.ricochetLeft, Projectile.isEmpowered, Projectile.isStorm optional fields.
+   165→- Implemented mechanics in gameLogic.ts:
+   166→  * tickAbilities() — new function for timeWarp slow-mo + arrowStorm rain (called from useGameLoop after tickSpawn).
+   167→  * tickPlayer() — shieldBattery charge regen.
+   168→  * tickEnemies() — slowMult applied to all enemy movement; collision block adds lastStand dmg reduction, shieldBattery absorb, thorns reflect, phoenix revive.
+   169→  * tickProjectiles() — executioner bonus dmg, critLethal instakill, critLeech heal, ricochet redirect, coreMagnet/jackpot/scoreBoost on kill.
+   170→  * shootProjectile() — overcharge counter + empowered shots, multishot extra arrows with spread, ricochetLeft init.
+   171→- Extended useGameLoop onGameOver signature with bonusCores param; passed through GameCanvas + GameScreen.
+   172→- Extended Index.tsx handleGameOver to receive & use bonusCores; updated defaultProgress() in both Index.tsx and localStore.ts.
+   173→- Extended UpgradesScreen.tsx SATELLITE_NODES with all 15 new satellites + 3 elite satellites (timeWarp/arrowStorm/phoenix with linkFrom arrays).
+   174→- Extended buildStatCategories() to add new stat rows to each category + new 'elite' category (purple #bf00ff) with the 3 elite upgrades.
+   175→- Added 68 NEW i18n keys to ru.ts (15 names + 15 descs + 15 stats + 15 statdescs + 7 value labels + 1 elite cat label).
+   176→- All new keys use the same dot-notation convention and are inserted in their proper sections (after doubleCores).
+   177→
+   178→Stage Summary:
+   179→- 15 new upgrades are FULLY playable: mechanics wired through state init, game loop, projectiles, enemies, and shootProjectile.
+   180→- 15 new tree satellites + 3 elites render correctly (existing buildTree already supports requiresAll + linkFrom + perpendicular offsets).
+   181→- New 'elite' stats category (#bf00ff purple) displays timeWarp/phoenix/arrowStorm as either "нет" (none) or special final labels (slowmo/revive/arrowRain).
+   182→- RU source-of-truth strings finalized in ru.ts.
+   183→- NEED: 6 sibling language files (en/zh/es/ar/de/fr) must add the EXACT same 68 new keys with translations, preserving all {placeholders}, emojis, ×/−/— symbols.
+   184→
+   185→New i18n keys to translate (PRESERVE EXACTLY — same dot-notation keys, only values translated):
+   186→- upgrades.cat.elite (1)
+   187→- upgrades.name.{ricochet,multishot,overcharge,executioner,critLethal,critLeech,thorns,shieldBattery,lastStand,coreMagnet,scoreBoost,jackpot,timeWarp,phoenix,arrowStorm} (15)
+   188→- upgrades.desc.{...same 15...} (15)
+   189→- upgrades.stat.{...same 15...} (15)
+   190→- upgrades.statdesc.{...same 15...} (15)
+   191→- upgrades.value.{bounces,shots,hp,charges,slowmo,revive,arrowRain} (7)
+   192→Total: 68 new keys per language file.
+   193→
+   194→Reference values from ru.ts (the source of truth):
+   195→- upgrades.cat.elite = 'ЭЛИТА'
+   196→- upgrades.name.ricochet = 'Рикошет' / multishot = 'Веер' / overcharge = 'Перезаряд' / executioner = 'Палач'
+   197→- upgrades.name.critLethal = 'Смертельный крит' / critLeech = 'Кража жизни'
+   198→- upgrades.name.thorns = 'Шипы' / shieldBattery = 'Щит-батарея' / lastStand = 'Последний рубеж'
+   199→- upgrades.name.coreMagnet = 'Ядерный магнит' / scoreBoost = 'Очки' / jackpot = 'Джекпот'
+   200→- upgrades.name.timeWarp = 'Искажение времени' / phoenix = 'Феникс' / arrowStorm = 'Ливень стрел'
+   201→- upgrades.desc.* (15 lines with mechanics explanations)
+   202→- upgrades.stat.* (15 names — for critLethal use short form like 'Смерт. крит')
+   203→- upgrades.statdesc.* (15 short descriptions)
+   204→- upgrades.value.bounces = 'отск.' / shots = 'выстр.' / hp = 'HP' / charges = 'зар.' / slowmo = 'замедление' / revive = 'возрождение' / arrowRain = 'ливень'
+   205→
+   206→The 'HP' value label and emojis (🪃🌸🌟☠️💀🩸🌵🔋🩹📥🏅💰⏳🔥🌧️👑 etc.) should be preserved verbatim in ALL languages. The '×' symbol and '−' (U+2212) and '%' symbols should be preserved verbatim.
+   207→
+   208→Each subagent will:
+   209→1. Read /home/z/my-project/worklog.md first to see prior work.
+   210→2. Read the corresponding language file at /home/z/my-project/src/i18n/<lang>.ts to see existing translation style and conventions.
+   211→3. Read /home/z/my-project/src/i18n/ru.ts (or the english reference) for the 68 new keys' source values.
+   212→4. Insert the 68 new keys in the matching sections (after the doubleCores entries in each section) of <lang>.ts.
+   213→5. Verify the keys compile by running `npx tsc --noEmit src/i18n/<lang>.ts src/i18n/types.ts` (or similar).
+   214→6. Append a new section to /home/z/my-project/worklog.md with Task ID 8-<lang> using the standard template.
+   215→
+   216→
+   217→---
+   218→Task ID: 8-zh
+   219→Agent: general-purpose (Chinese translator)
+   220→Task: Add 68 new upgrade i18n keys to zh.ts
+   221→
+   222→Work Log:
+   223→- Read /home/z/my-project/worklog.md to review prior work (Task 0 i18n scaffolding, Task 7-a zh base translation, Task 8 main adding 15 new upgrades).
+   224→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, now 392 keys) — located the 6 NEW sections marked with `// ===== NEW` comments: upgrade names, upgrade descriptions, elite category, stat names, stat descriptions, and value labels.
+   225→- Read /home/z/my-project/src/i18n/zh.ts (existing Chinese file at 324 keys) to understand existing style/terminology (弓, 箭, 敌人, 波次, HP, 分数, 宇宙核心, BOSS/首领, 箭袋, 装填, 穿透, 暴击, 护甲, 生命回复, 冲击波, 磁力).
+   226→- Read /home/z/my-project/src/i18n/en.ts (English reference) to confirm mechanic meanings.
+   227→- Inserted 68 new keys into zh.ts via 6 Edit operations, each anchored on the existing `doubleCores` (or `chanceX2` / `economy`) line in the matching section:
+   228→  * 15 new upgrade names (ricochet/multishot/overcharge/executioner/critLethal/critLeech/thorns/shieldBattery/lastStand/coreMagnet/scoreBoost/jackpot/timeWarp/phoenix/arrowStorm) — added after `upgrades.name.doubleCores`.
+   229→  * 15 new upgrade descriptions — added after `upgrades.desc.doubleCores`.
+   230→  * 1 new category label `upgrades.cat.elite` = '精英' — added after `upgrades.cat.economy`.
+   231→  * 15 new stat names — added after `upgrades.stat.doubleCores`.
+   232→  * 15 new stat descriptions — added after `upgrades.statdesc.doubleCores`.
+   233→  * 7 new value labels (bounces/shots/hp/charges/slowmo/revive/arrowRain) — added after `upgrades.value.chanceX2`.
+   234→- Translated values into natural Simplified Chinese matching existing terminology. Used suggested names: ricochet='弹射', multishot='齐射', overcharge='过载', executioner='处决者', critLethal='致命暴击', critLeech='暴击吸血', thorns='荆棘', shieldBattery='护盾电池', lastStand='背水一战', coreMagnet='核心磁铁', scoreBoost='分数加成', jackpot='头奖', timeWarp='时间扭曲', phoenix='凤凰', arrowStorm='箭雨'.
+   235→- Translated mechanic descriptions in desc.* preserving numeric thresholds (50/60/70%, 10/20/30%, ×1.5, ×0.75, ×5, ×2, 25 HP, 30%, 2.5秒, 12秒, 15秒, 24, 1.5秒, 50% HP) and the '%' symbol verbatim.
+   236→- Wrote short (4-8 char) stat descriptions for statdesc.*.
+   237→- Used value labels per spec: bounces='反弹', shots='发射', hp='HP' (verbatim Latin), charges='充能', slowmo='慢动作', revive='复活', arrowRain='箭雨'.
+   238→- Verified key parity via Python regex extraction: ru.ts has 392 keys, zh.ts has 392 keys — zero missing, zero extra (✅ KEYS_MATCH_OK).
+   239→- Verified TypeScript compiles cleanly with `npx tsc --noEmit src/i18n/zh.ts src/i18n/types.ts` — no errors emitted (exit 0, no output).
+   240→- The new keys do not introduce any new placeholders; existing placeholders ({pct}, {name}, {acquired}, {total}, {levels}, {max}, {unlocked}, {wave}) remain untouched in unchanged keys.
+   241→
+   242→Stage Summary:
+   243→- Artifact: /home/z/my-project/src/i18n/zh.ts (392 keys, ~440 lines incl. comments) — Chinese translation now matches ru.ts byte-for-byte at the key level.
+   244→- Key count added: 68 (1 elite category + 15 names + 15 descs + 15 stats + 15 statdescs + 7 value labels).
+   245→- Terminology decisions: 弹射=ricochet, 齐射=multishot, 过载=overcharge, 处决者=executioner, 致命暴击=critLethal, 暴击吸血=critLeech, 荆棘=thorns, 护盾电池=shieldBattery, 背水一战=lastStand, 核心磁铁=coreMagnet, 分数加成=scoreBoost, 头奖=jackpot, 时间扭曲=timeWarp, 凤凰=phoenix, 箭雨=arrowStorm, 精英=elite category, 反弹/发射/HP/充能/慢动作/复活/箭雨=value labels.
+   246→- All numeric thresholds, ×/− (U+2212)/—/% symbols, and existing Chinese terminology preserved verbatim.
+   247→- No code wiring required — types.ts already declares 'zh' in Lang and LANGUAGES; zh.ts is standalone and ready for the LanguageContext consumer.
+   248→
+   249→---
+   250→Task ID: 8-es
+   251→Agent: general-purpose (Spanish translator)
+   252→Task: Add 68 new upgrade i18n keys to es.ts
+   253→
+   254→Work Log:
+   255→- Read /home/z/my-project/worklog.md to understand prior i18n work (Task 0 main + Task 7-b Spanish baseline + Task 8 main added 15 new upgrades + 68 new RU keys).
+   256→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, 392 keys) — focused on the 5 `// ===== NEW` sections (names, descs, stat names, statdescs, value labels) plus the `upgrades.cat.elite` entry.
+   257→- Read /home/z/my-project/src/i18n/es.ts (existing Spanish baseline, 324 keys) to confirm terminology conventions established in Task 7-b: arco/flecha/enemigo/oleada/VID (HUD chip) /puntos/núcleos cósmicos/mejora/jefe/carcaj/recarga/perforación/crítico/blindaje/regeneración/onda de choque/imán/Omega, guillemets «…» for upgrade name references, 'VID/s' for hpPerSec, 'probabilidad ×2' for chanceX2.
+   258→- Read /home/z/my-project/src/i18n/en.ts as English reference (en.ts has NOT yet been updated by sibling Task 8-en — only ru.ts carries the new keys; my source of truth was ru.ts).
+   259→- Inserted 68 new keys into es.ts in their proper sections (after the existing `doubleCores` entries in each section, and `cat.elite` immediately after `cat.economy`), using the Edit tool with `old_str` set to the corresponding `doubleCores`/`economy`/`chanceX2` line and `new_str` re-emitting the original line plus the new keys with section header comments matching ru.ts.
+   260→- Translations chosen (neutral Spanish understood across LatAm and Spain):
+   261→  * cat.elite = 'ÉLITE'
+   262→  * Names: ricochet='Rebote', multishot='Abanico', overcharge='Sobrecarga', executioner='Verdugo', critLethal='Crítico Letal', critLeech='Robo de Vida', thorns='Espinas', shieldBattery='Batería de Escudo', lastStand='Última Línea', coreMagnet='Imán de Núcleos', scoreBoost='Bonus de Puntos', jackpot='Jackpot' (kept loanword as in ru 'Джекпот'), timeWarp='Distorsión Temporal', phoenix='Fénix', arrowStorm='Lluvia de Flechas'.
+   263→  * Descs translated verbatim from ru mechanics, preserving ×, %, numeric thresholds (50/60/70%, 10/20/30%, ×1.5, ×5, ×0.75, 25, 24, 2.5 s, 12 s, 15 s, +1.5 s). HP→VID used inside the mechanics descriptions to match es.ts HUD chip terminology (existing es style).
+   264→  * Stats: same short noun forms as names except critLethal='Crít. letal' (abbreviated to mirror ru 'Смерт. крит' style and existing es abbreviations 'Prob.'/'máx.').
+   265→  * Statdescs: brief 4-7 word summaries mirroring ru wording.
+   266→  * Value labels: bounces='rebotes', shots='disparos', hp='HP' (preserved verbatim per spec), charges='cargas', slowmo='cámara lenta', revive='revivir', arrowRain='lluvia'.
+   267→- Verified key parity via ripgrep key extraction: 392 keys in ru.ts == 392 keys in es.ts, sorted diff exit 0 (zero missing / extra / renamed). 324 original + 68 new = 392 confirmed.
+   268→- Verified 67 of the 68 new keys (15 names + 15 descs + 15 stats + 15 statdescs + 7 values = 67) are byte-for-byte present in es.ts plus the 1 elite category label (cat.elite) for 68 total.
+   269→- Verified × symbol appears in 4 of the new value/desc strings (×1.5, ×5 ×2 occurrences, ×0.75), % appears 7 times in new desc strings — all preserved verbatim.
+   270→- Verified TypeScript compiles cleanly: `npx tsc --noEmit src/i18n/es.ts src/i18n/types.ts` → exit 0, no output.
+   271→
+   272→Stage Summary:
+   273→- Artifact: /home/z/my-project/src/i18n/es.ts (392 keys, ~455 lines) — Spanish translation extended with all 68 new upgrade i18n keys matching ru.ts byte-for-byte.
+   274→- Terminology decisions: kept es.ts baseline terminology (VID for HP, flecha/carcaj, núcleos cósmicos, jefe, recarga, perforación, crítico, blindaje, regeneración, onda de choque, imán); preserved 'Jackpot' as English loanword (matches ru 'Джекпот' choice); used 'cámara lenta' for slowmo value label (universally understood neutral Spanish for slow-motion); abbreviated stat name critLethal='Crít. letal' to match ru 'Смерт. крит' compactness and existing es abbreviation conventions ('Prob.', 'máx.').
+   275→- All special characters (×, %, − U+2212 in pre-existing statdesc.reload/armor) preserved verbatim; no emojis appear in the new i18n values (emojis are confined to upgrade tree satellite definitions in code, not i18n).
+   276→- No other language files (ru/en/zh/ar/de/fr) were modified.
+   277→- Ready to be wired into the LanguageContext consumer alongside the existing es baseline.
+   278→
+   279→---
+   280→Task ID: 8-ar
+   281→Agent: general-purpose (Arabic translator)
+   282→Task: Add 68 new upgrade i18n keys to ar.ts
+   283→
+   284→Work Log:
+   285→- Read /home/z/my-project/worklog.md to review prior i18n scaffolding (Task 0) + Task 7-c (initial Arabic file) + Task 8 (RU source-of-truth additions).
+   286→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, 392 keys, 68 new) — focused on the six `// ===== NEW` sections inserted after `doubleCores`/`cat.economy`/`chanceX2` markers.
+   287→- Read /home/z/my-project/src/i18n/ar.ts (existing Arabic, 324 keys) to confirm terminology conventions: قوس/سهم/عدو/موجة/الصحة/النقاط/النوى الكونية/ترقية/الزعيم/كنانة/إعادة التحميل/اختراق/حرج/دفاع/تجدد/موجة صدمية/مغناطيس + short-form stat naming (e.g. 'ضرر حرج', 'مغناطيس مصغر').
+   288→- Read /home/z/my-project/src/i18n/en.ts for English reference meanings of the 15 new mechanics.
+   289→- Inserted 68 new keys into ar.ts via MultiEdit at 6 anchor points:
+   290→  * `upgrades.name.*` (15) after `'upgrades.name.doubleCores'` line
+   291→  * `upgrades.desc.*` (15) after `'upgrades.desc.doubleCores'` line
+   292→  * `upgrades.cat.elite` (1) immediately after `'upgrades.cat.economy'` line
+   293→  * `upgrades.stat.*` (15) after `'upgrades.stat.doubleCores'` line
+   294→  * `upgrades.statdesc.*` (15) after `'upgrades.statdesc.doubleCores'` line
+   295→  * `upgrades.value.*` (7) after `'upgrades.value.chanceX2'` line
+   296→- Used suggested Arabic translations for names: ricochet='الارتداد', multishot='الوابل', overcharge='الشحن الزائد', executioner='الجلاد', critLethal='الحرج القاتل', critLeech='امتصاص حرج', thorns='الأشواك', shieldBattery='بطارية الدرع', lastStand='الموقف الأخير', coreMagnet='مغناطيس النوى', scoreBoost='مكافأة النقاط', jackpot='الجائزة الكبرى', timeWarp='تشويه الزمن', phoenix='العنقاء', arrowStorm='عاصفة السهام'.
+   297→- Translated desc.* mechanics into natural MSA, preserving symbols verbatim: ×1.5, ×5, ×0.75, ×2, % (e.g. +15%, +5%, +3%/مستوى, 25%, 50%, 30%, 35%, 50/60/70%, 10/20/30%) and HP (kept verbatim in critLeech/lastStand/phoenix/value.hp — naturally substituted with 'الصحة' elsewhere to match existing ar.ts conventions).
+   298→- Short-form stat.critLethal = 'حرج قاتل' (matching the short-form style of 'ضرر حرج' / 'احتمال حرج' already in ar.ts); other 14 stat names mirror the upgrade names per ru.ts convention.
+   299→- Used brief statdesc.* (3–6 words each) per spec: ricochet='الأسهم ترتد إلى أعداء جدد بعد الإصابة', multishot='فرصة لإطلاق أسهم إضافية بأسلوب المروحة', etc.
+   300→- Used value labels per spec: bounces='ارتدادات', shots='طلقات', hp='HP' (verbatim), charges='شحنات', slowmo='بطيء', revive='إحياء', arrowRain='وابل'.
+   301→- Verified via Python regex: ar.ts now contains 392 keys, ru.ts contains 392 keys — zero missing, zero extra (parity confirmed).
+   302→- Verified all 68 new keys individually present in ar.ts.
+   303→- Verified special-symbol preservation in the new section: × (7 occurrences in ar == 7 in ru), − U+2212 (2 == 2), % (28 == 28). All matched.
+   304→- Verified TypeScript compilation: `npx tsc --noEmit src/i18n/ar.ts src/i18n/types.ts` → exit 0, no output (clean compile).
+   305→- Did NOT touch ru.ts/en.ts/zh.ts/es.ts/de.ts/fr.ts — only ar.ts edited; no existing keys modified, only 68 new keys added.
+   306→
+   307→Stage Summary:
+   308→- Artifact: /home/z/my-project/src/i18n/ar.ts (392 keys, ~465 lines incl. comments) — Arabic translation now at parity with ru.ts source-of-truth for all 15 new unique upgrades + elite category + 7 value labels.
+   309→- Key count added: 68 (15 names + 15 descs + 15 stats + 15 statdescs + 7 values + 1 cat label).
+   310→- Terminology decisions: ricochet→الارتداد, multishot→الوابل, overcharge→الشحن الزائد, executioner→الجلاد, critLethal→الحرج القاتل (stat short form 'حرج قاتل'), critLeech→امتصاص حرج, thorns→الأشواك, shieldBattery→بطارية الدرع, lastStand→الموقف الأخير, coreMagnet→مغناطيس النوى, scoreBoost→مكافأة النقاط, jackpot→الجائزة الكبرى, timeWarp→تشويه الزمن, phoenix→العنقاء, arrowStorm→عاصفة السهام, elite→النخبة.
+   311→- All ×/−/%/HP symbols preserved verbatim per task spec; placeholders (none in the 68 new keys) unaffected; existing keys untouched.
+   312→- RTL bidi algorithm handles mixed Latin/Arabic tokens (HP, ×N, %, numbers) correctly inline per documented ar.ts header note.
+   313→
+   314→---
+   315→Task ID: 8-en
+   316→Agent: general-purpose (English translator)
+   317→Task: Add 68 new upgrade i18n keys to en.ts
+   318→
+   319→Work Log:
+   320→- Read /home/z/my-project/worklog.md to understand prior i18n scaffolding (Tasks 0, 7-a/b/c/d/e, 8).
+   321→- Read /home/z/my-project/src/i18n/ru.ts (source of truth) — identified 68 NEW keys in 6 sections marked with `// ===== NEW` comments (15 name + 15 desc + 1 cat + 15 stat + 15 statdesc + 7 value).
+   322→- Read /home/z/my-project/src/i18n/en.ts to study existing English terminology (bow, arrow, enemy, wave, HP, score, cosmic cores, upgrade, boss, quiver, reload, piercing, crit, armor/defense, regeneration, shockwave, magnet) and existing style conventions:
+   323→  * desc.* uses ASCII hyphen-minus '-' for '-5% reload time' / '-3% damage taken'.
+   324→  * statdesc.* uses U+2212 minus '−' for '−5% reload time' / '−3% damage taken'.
+   325→  * Category labels kept UPPERCASE (ATTACK, CRITICAL DAMAGE, DEFENSE, ECONOMy→ECONOMY).
+   326→  * Stat names use short Title Case forms ('Crit chance', 'Max durability', 'Mini magnet', 'Double cores').
+   327→- Inserted the 68 new keys via MultiEdit (6 atomic edits) into en.ts, each block inserted immediately after the matching `doubleCores` (or `chanceX2` for value labels / `economy` for cat) entry, mirroring ru.ts section layout. Added `// ===== NEW ... =====` section comments to match ru.ts convention.
+   328→- English translations chosen to mirror ru.ts mechanic wording while sounding natural:
+   329→  * upgrades.cat.elite = 'ELITE' (per spec)
+   330→  * upgrades.name.* — per spec suggestions: Ricochet, Volley, Overcharge, Executioner, Lethal Crit, Crit Leech, Thorns, Shield Battery, Last Stand, Core Magnet, Score Boost, Jackpot, Time Warp, Phoenix, Arrow Storm.
+   331→  * upgrades.desc.* — translated mechanics: e.g. ricochet → 'Arrow bounces to the nearest enemy after a hit (+1 bounce per level)', overcharge → 'Every Nth shot is empowered (×1.5 damage, guaranteed crit)', timeWarp → 'Periodically slows all enemies to 35% speed for 2.5 sec (every 12 sec)', phoenix → 'One-time revive with 50% HP on death (+1.5 sec invulnerability)'.
+   332→  * upgrades.stat.* — short forms matching existing en stat style; critLethal stays 'Lethal Crit' (short form per spec), scoreBoost uses 'Score Bonus' (mirroring ru.ts stat variant 'Бонус очков').
+   333→  * upgrades.statdesc.* — brief 4–6 word descriptions (e.g. 'Crits instantly kill weak enemies', 'Periodic absorbing shield', 'Damage reduction at low HP', 'Rare chance of ×5 cores').
+   334→  * upgrades.value.* — per spec: bounces='bounces', shots='shots', hp='HP', charges='charges', slowmo='slow-mo', revive='revive', arrowRain='rain'.
+   335→- Preserved all symbols verbatim: ×1.5, ×0.75, ×5, ×2 (in pre-existing keys), % signs, +, /, ., : in numbers like 2.5 sec, 1.5 sec, 50/60/70%, 10/20/30%, 25%, 30%, 35%, 50%.
+   336→- Preserved 'HP' label verbatim per spec (upgrades.value.hp = 'HP').
+   337→- Ran `npx tsc --noEmit src/i18n/en.ts src/i18n/types.ts` → exit 0, no errors.
+   338→- Verified key parity: extracted and diffed sorted keys from en.ts vs ru.ts → KEYS_MATCH_OK (zero missing/extra keys).
+   339→- Verified 68 new keys counted in en.ts via ripgrep regex.
+   340→
+   341→Stage Summary:
+   342→- Artifact: /home/z/my-project/src/i18n/en.ts (now 324 + 68 = 392 keys, ~420 lines incl. NEW section comments).
+   343→- Key count added: 68.
+   344→- Terminology decisions:
+   345→  * multishot → 'Volley' (vs literal 'Fan'/'Multishot') — concise and matches the angle-spread mechanic description.
+   346→  * scoreBoost name='Score Boost' (per spec); stat.scoreBoost='Score Bonus' to mirror ru.ts where stat variant differs from name variant (Бонус очков vs Очки).
+   347→  * stat.critLethal kept as 'Lethal Crit' (short form, per spec example).
+   348→  * 'Arrow Storm' (name) instead of literal 'Arrow Rain' to avoid collision with value.arrowRain='rain'.
+   349→  * Mechanical phrasing: 'Every Nth shot is empowered' for overcharge; 'instantly kill normal enemies below an HP threshold' for critLethal; 'Periodically rains 24 arrows onto the field from above' for arrowStorm — natural English while preserving all numeric/symbol tokens.
+   350→- All 68 keys compile cleanly and match ru.ts key structure byte-for-byte (only values translated). Ready to be consumed by the existing LanguageContext that imports `en`.
+   351→
+   352→---
+   353→Task ID: 8-fr
+   354→Agent: general-purpose (French translator)
+   355→Task: Add 68 new upgrade i18n keys to fr.ts
+   356→
+   357→Work Log:
+   358→- Read /home/z/my-project/worklog.md to understand prior i18n infrastructure (Tasks 0, 7-a/b/c/d/e, 8).
+   359→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, 392 keys) — identified the 68 NEW keys across 6 sections marked with `// ===== NEW ... =====` comments: upgrade names (15), upgrade descriptions (15), elite category label (1), stat names (15), stat descriptions (15), value labels (7).
+   360→- Read /home/z/my-project/src/i18n/fr.ts (existing 324-key French translation) to study established terminology and style (PV for HP, noyaux cosmiques, carquois, rechargement, perforation, chance/dégâts critiques, armure, régénération, onde de choc, aimant, éventail, sauf les boss).
+   361→- Read /home/z/my-project/src/i18n/en.ts to cross-check English reference meanings (note: en.ts not yet updated with the 68 new keys, so relied on ru.ts as source of truth per task spec).
+   362→- Performed 6 atomic Edit operations on fr.ts, inserting new keys immediately after the corresponding `doubleCores` (or `cat.economy`/`value.chanceX2`) entries — same insertion point convention as ru.ts:
+   363→  1. NEW upgrade names (15) — after `upgrades.name.doubleCores`
+   364→  2. NEW upgrade descriptions (15) — after `upgrades.desc.doubleCores`
+   365→  3. NEW elite category (1) — after `upgrades.cat.economy`
+   366→  4. NEW stat names (15) — after `upgrades.stat.doubleCores`
+   367→  5. NEW stat descriptions (15) — after `upgrades.statdesc.doubleCores`
+   368→  6. NEW value labels (7) — after `upgrades.value.chanceX2`
+   369→- Verified via ripgrep-equivalent Python regex that the 68 new keys in fr.ts match ru.ts exactly (zero missing/extra) AND full 392-key parity with ru.ts (zero missing/extra) — i.e. fr.ts went from 324 → 392 keys.
+   370→- Translated all values into natural French following established fr.ts conventions:
+   371→  * Percentages use French typography (space before %, e.g. '+5 % par niveau') matching existing fr.ts lines 150-160.
+   372→  * Decimal numbers use French comma separator (×1,5 and ×0,75) consistent with French locale; × symbol preserved verbatim.
+   373→  * Time durations abbreviated with 's' and space (e.g. '2,5 s', 'toutes les 12 s') matching French typographic convention.
+   374→  * 'N-ième' used for the Russian 'N-й' ordinal placeholder.
+   375→  * Apostrophes in single-quoted TypeScript strings escaped as `\'` (consistent with existing fr.ts style, e.g. `l\'ennemi`, `d\'absorption`, `d\'obtenir`, `d\'invulnérabilité`, `d\'un`).
+   376→  * Stat descriptions kept to 4–6 word terse forms (per task spec) — e.g. 'Tirs supplémentaires en éventail', 'Critiques tuent les ennemis affaiblis', 'Noyau bonus par ennemi tué'.
+   377→  * Stat names mirror upgrade names except `critLethal` → 'Crit. Létale' (short form mirroring RU's 'Смерт. крит').
+   378→  * Value labels per task spec: bounces='rebonds', shots='tirs', hp='HP' (preserved verbatim per worklog Task 8 directive), charges='charges', slowmo='ralenti', revive='renaissance', arrowRain='pluie'.
+   379→  * Upgrade names: ricochet='Ricochet' (collides with enemy.bouncer.name 'Ricochet' — same French word, different keys, no conflict), multishot='Salve', overcharge='Surcharge', executioner='Bourreau', critLethal='Critique Létale', critLeech='Vol de Vie Crit.', thorns='Épines', shieldBattery='Batterie de Bouclier', lastStand='Dernier Rempart', coreMagnet='Aimant à Noyaux', scoreBoost='Bonus de Points', jackpot='Jackpot', timeWarp='Distorsion Temporelle', phoenix='Phénix', arrowStorm='Pluie de Flèches'.
+   380→  * Description for `thorns` preserves the bare `%` placeholder token verbatim (matching RU source `'Отражает % полученного урона...'`) — runtime is expected to prepend the numeric percentage.
+   381→- Ran `npx tsc --noEmit src/i18n/fr.ts src/i18n/types.ts` → exit 0, no errors, no output (clean compile).
+   382→
+   383→Stage Summary:
+   384→- Artifact: /home/z/my-project/src/i18n/fr.ts (392 keys, ~450 lines incl. comments) — full French translation now includes all 15 new unique upgrades + elite category.
+   385→- Key count added: 68 (15 name + 15 desc + 1 cat + 15 stat + 15 statdesc + 7 value).
+   386→- Terminology decisions: arc=arc, flèche(s), ennemi(s), vague, PV (points de vie), noyaux cosmiques, amélioration, carquois, rechargement, perforation, (chance/dégâts) critiques, armure (défense), régénération, onde de choc, aimant — all consistent with prior Task 7-e work; preserved Boss Omega='Omega'.
+   387→- All `×`, `−` (U+2212), `%`, `—` symbols preserved verbatim; no new emojis introduced in this batch (upgrade names are plain text without emojis); no runtime placeholders (`{...}`) introduced in this batch.
+   388→- TypeScript compiles cleanly; key parity with ru.ts verified at full-file (392/392) and new-keys-only (68/68) granularity.
+   389→- Only fr.ts modified; ru.ts/en.ts/zh.ts/es.ts/ar.ts/de.ts untouched per task constraints.
+   390→
+   391→---
+   392→Task ID: 8-de
+   393→Agent: general-purpose (German translator)
+   394→Task: Add 68 new upgrade i18n keys to de.ts
+   395→
+   396→Work Log:
+   397→- Read /home/z/my-project/worklog.md to understand prior i18n infrastructure (Tasks 0, 7-a/7-b/7-c/7-d/7-e, 8) and the 68 new keys required (15 names + 15 descs + 1 cat + 15 stats + 15 statdescs + 7 value labels).
+   398→- Read /home/z/my-project/src/i18n/ru.ts (source of truth, 68 new keys marked with `// ===== NEW ... =====` section headers) — focus on the 6 new sections inserted after doubleCores/chanceX2/cat.economy.
+   399→- Read /home/z/my-project/src/i18n/de.ts (existing German translation, 324 keys) to learn established terminology: Bogen/Pfeil/Gegner/Welle/HP/Kerne/Upgrade/Boss/Köcher/Nachladen/Durchschlag/Krit./Rüstung/Regeneration/Schockwelle/Magnet, German quotation marks „…", dot thousands separator (1.000), no space before %.
+   400→- Read /home/z/my-project/src/i18n/en.ts (English reference) for cross-checking mechanics semantics; en.ts pre-dates Task 8 so it doesn't yet have the 68 new keys.
+   401→- Used MultiEdit with 6 atomic edits to insert the 68 new keys into de.ts in the matching sections (after `doubleCores` / `cat.economy` / `chanceX2`), mirroring the ru.ts `// ===== NEW ... =====` section header convention.
+   402→- Translated all values into natural idiomatic German matching existing terminology:
+   403→  * Upgrade names: ricochet=Abprall, multishot=Fächer, overcharge=Überladung, executioner=Scharfrichter, critLethal=Tödlicher Krit, critLeech=Krit-Lebensraub, thorns=Dornen, shieldBattery=Schildbatterie, lastStand=Letztes Gefecht, coreMagnet=Kernmagnet, scoreBoost=Punktebonus, jackpot=Jackpot, timeWarp=Zeitverzerrung, phoenix=Phönix, arrowStorm=Pfeilregen.
+   404→  * Stat names mirror upgrade names (same as ru convention) except critLethal shortened to 'Tödl. Krit' (parallel to ru 'Смерт. крит'), and critLeech kept 'Krit-Lebensraub' matching existing 'Krit-Chance'/'Krit. Schaden' style.
+   405→  * Stat descriptions kept brief (4-6 words): e.g. 'Pfeile prallen nach Treffer zu neuen Gegnern', 'Verstärkter Schuss alle N Schüsse', 'Periodischer Absorptionsschild', 'Einmalige Wiedererweckung'.
+   406→  * Value labels: bounces='Abprall', shots='Schüsse', hp='HP', charges='Ladg.', slowmo='Zeitlupe', revive='Wiedererweckung', arrowRain='Pfeilregen' — chosen for natural German UI brevity matching existing 'Rückstoß'/'Schaden' labels (no trailing periods since German UI convention doesn't use abbreviation periods on full words; 'Ladg.' keeps period as parallel abbreviation of 'Ladungen' to match ru 'зар.').
+   407→  * Category label `upgrades.cat.elite` = 'ELITE' (uppercase parallel to existing 'ANGRIFF'/'WIRTSCHAFT' etc.).
+   408→- Preserved the % symbol verbatim in `upgrades.desc.thorns` ('Reflektiert % des erlittenen Schadens …') to mirror ru's literal % placeholder; preserved the × symbol in overcharge/jackpot/arrowStorm descs/statdescs; preserved − (U+2212) in existing reload/armor entries (unchanged).
+   409→- Used German decimal comma (1,5 / 2,5 / 0,75) instead of dot decimals, matching German typographical convention (dot is reserved for thousands separator per Task 7-d worklog). Applies to: `×1,5 Schaden`, `2,5 Sek`, `+1,5 Sek`, `×0,75 Schaden`.
+   410→- No emojis appear in any of the 68 new i18n values (per task spec — emojis live in upgrade tree node data, not in i18n values), so no emoji preservation was needed for these keys.
+   411→- Verified with ripgrep: 68 new keys extracted from de.ts == 68 new keys extracted from ru.ts → KEYS_MATCH_OK (zero missing/extra/renamed).
+   412→- Verified × symbol count: 8 occurrences in de.ts == 8 occurrences in ru.ts (4 pre-existing + 4 new: ×1,5, ×5, ×0,75, plus ×2 in jackpot/statdesc.jackpot and existing ×2 in chanceX2/doubleCores).
+   413→- Verified TypeScript compilation: `npx tsc --noEmit src/i18n/de.ts src/i18n/types.ts` → exit 0, no errors emitted.
+   414→
+   415→Stage Summary:
+   416→- Artifact: /home/z/my-project/src/i18n/de.ts (now 392 keys = 324 original + 68 new, ~440 lines incl. comments).
+   417→- Key count added: 68 (1 cat.elite + 15 name.* + 15 desc.* + 15 stat.* + 15 statdesc.* + 7 value.*).
+   418→- Terminology decisions: kept established German terms (Bogen/Pfeil/Gegner/Welle/HP/Kerne/Upgrade/Boss/Köcher/Nachladen/Durchschlag/Krit./Rüstung/Regeneration/Schockwelle/Magnet); new German terms introduced: Abprall (ricochet), Fächer (multishot fan), Überladung (overcharge), Scharfrichter (executioner), Tödlicher Krit / Tödl. Krit (critLethal long/short), Krit-Lebensraub (critLeech — Krit- prefix matches existing Krit-Chance/Krit. Schaden style), Dornen (thorns), Schildbatterie (shield battery), Letztes Gefecht (last stand — more idiomatic than "Letzte Position"), Kernmagnet (core magnet), Punktebonus (score boost), Jackpot (jackpot — international loanword common in German), Zeitverzerrung (time warp), Phönix (phoenix), Pfeilregen (arrow rain/storm).
+   419→- Used German decimal commas (×1,5; 2,5 Sek; +1,5 Sek; ×0,75) for typographical correctness with dot-as-thousands-separator convention.
+   420→- All emoji/symbol/percent preservation requirements met; no existing keys modified; only the 68 new keys were added in the proper sections (after doubleCores in name/desc/stat/statdesc, after cat.economy, after chanceX2).
+   421→
+   422→---
+   423→Task ID: 9 (CANCELLED)
+   424→Agent: main (Z.ai Code)
+   425→Task: Add toilet necessity indicator + coffee mechanic (user request, later cancelled by user)
+   426→
+   427→Work Log:
+   428→- Explored game code (gameLogic.ts, useGameLoop.ts, GameCanvas.tsx, config.ts, GameScreen.tsx, gameRenderer.ts) to plan the feature.
+   429→- NO code changes were made — feature was cancelled before implementation started.
+   430→- User said the request was sent by accident ("я случайно не то тебе отправил").
+   431→- Verified: git working tree is clean, dev server healthy, all game files intact.
+   432→
+   433→Stage Summary:
+   434→- Nothing to revert: the toilet indicator / coffee mechanic was never implemented.
+   435→- Game state unchanged: new upgrades (Task 7/8) and mini black hole swarm (earlier task) remain in place.
+   436→
+   437→---
+   438→Task ID: 10
+   439→Agent: main (Z.ai Code)
+   440→Task: Динамическое реалистичное освещение (свет от врагов и босса) + оптимизация рендера без потери качества
+   441→
+   442→Work Log:
+   443→- Изучил текущий рендер: gameRenderer.ts (1163 строк), enemies.ts drawShape, useGameLoop — обнаружил, что свет врагов рисуется только «на себе» градиентами каждый кадр, окружение не освещается.
+   444→- СОЗДАЛ src/game/lightEngine.ts — модуль динамического освещения:
+   445→  * Слой света в half-res (LIGHT_SCALE=0.5): все источники рисуются на отдельный canvas (в 4 раза меньше пикселей), композит 'lighter' на сцену; апскейл даёт мягкий bloom-эффект.
+   446→  * Запечённые спрайты (bakeRadialSprite + кэш по ключу): свет с квадратичным спадом, аура врага (точная копия старого градиента), блик, виньетка, 4 спрайта мини-ЧД, световое кольцо ударной волны.
+   447→  * Источники света: каждый враг (цвет из e.color, мерцание sin, белая вспышка при попадании, alpha для призраков), босс (фазозависимый цвет: фиолетовый→маджента→красный, строб в фазе 2, синхронно с warnAlpha), стрелы (циан/оранж-крит/магнет-маджента), частицы взрывов (лимит 90/36/0 по качеству), мини-ЧД (фиолет 0.13), лук (циановая подсветка + дульная вспышка от bowPulse + красная вспышка при уроне), фиолетовая дымка при timeWarp.
+   448→  * Адаптивное качество по FPS: >=55 high, 48-55 medium (лимит 36 частиц света), <35 low (без частиц и ЧД света, радиусы ×0.85), авторегенерация.
+   449→  * Виньетка (512px спрайт, 1 drawImage).
+   450→  * Пул источников (MAX_LIGHTS=170) без аллокаций, отсечение off-screen.
+   451→- ОПТИМИЗИРОВАЛ gameRenderer.ts:
+   452→  * renderBackground: кэш позиций 150 звёзд (Float32Array, пересчёт только при resize; было 450 Math.sin/cos в кадр), группировка по слоям (3 fillStyle вместо 150), исправлен баг исчезновения звёзд (негативный modulo), 3 туманности → запечённые спрайты (было 3 createRadialGradient + blended заливки), кэш градиента фона.
+   453→  * renderParticles: ALPHA_HEX таблица вынесена на уровень модуля (было 256 toString на КАЖДЫЙ кадр).
+   454→  * renderEnemies: след врага — ОДНА полилиния с createLinearGradient (3 stroke) вместо ~26 stroke-вызовов попиксельной альфы (сглаживание стало плавнее); константы пунктиров DASH_PULSE_RING/DASH_INNER_RING (были аллокации массивов на врага в кадр); единый Date.now() на кадр.
+   455→  * renderMiniBlackHoles: 4 градиента на ЧД → запечённые спрайты (при 12 ЧД экономия 48 createRadialGradient в кадр); аккреционный диск теперь реально виден (в старом коде градиент диска сэмплировался на прозрачном краю = невидим).
+   456→  * renderAim: константа DASH_AIM_LINE.
+   457→- ОПТИМИЗИРОВАЛ enemies.ts drawShape:
+   458→  * tracePath() вынесен на уровень модуля (общий для рендера и запекания).
+   459→  * getShapeSprite(): запечённое ядро врага (радиальный градиент + glow-обводка 15px + белая обводка 1.5px за 1 drawImage в натуральном размере — ширины обводок точны), кэш по форма|цвет|радиус.
+   460→  * Аура врага → getAuraSprite (идентична старым стопам color/+88/+22/0).
+   461→  * Стеклянный блик → getSheenSprite (учтено смещение эллипса и поворот PI/6, клип по внутренней фигуре как в оригинальной логике путей).
+   462→  * Итог: ~0 createRadialGradient на обычного врага в кадр (было 2-3 × 35 врагов).
+   463→- Подключил renderLights в useGameLoop (после renderBow, до renderAim — прицел и HUD-текст остаются чёткими).
+   464→- Проверки: lint чистый; tsc — 0 НОВЫХ ошибок (все существующие ошибки trail/validator — предсуществующие, сверено через git stash); браузерное E2E (agent-browser + VLM):
+   465→  * Классика: свет врагов освещает фон и сетку, градиентные следы, циановая подсветка лука, виньетка, FPS 61-62.
+   466→  * Босс: фазовое свечение подтверждено (фаза 0 фиолетовый → фаза 1 маджента → фаза 2 КРАСНЫЙ со стробом, HP-бар и фон освещаются красным), рой мини-ЧД (8 шт в фазе 2) с фиолетовым свечением.
+   467→  * Ошибок в консоли нет; временный window.__saDebug хук добавлен для проверки фаз и УДАЛЁН после.
+   468→
+   469→Stage Summary:
+   470→- Артефакты: src/game/lightEngine.ts (новый, ~430 строк), gameRenderer.ts, enemies.ts, useGameLoop.ts.
+   471→- Визуальный апгрейд: реальное динамическое освещение сцены (враги/босс/стрелы/взрывы/ЧД освещают фон, сетку и друг друга), фазозависимый свет босса с красным стробом при агонии, дульные вспышки, вспышки попаданий, световые кольца ударных волн, дымка time warp, кинематографическая виньетка, видимый аккреционный диск ЧД.
+   472→- Оптимизация: слой света half-res + все градиенты запечены в спрайты (drawImage/GPU вместо createRadialGradient/CPU), кэши звёзд/туманностей/фона, след врага 3 stroke вместо 26, таблица ALPHA_HEX на модуль, константы dash-паттернов, адаптивное качество света по FPS с авторегенерацией.
+   473→- FPS в headless (software rendering): классика 61-62, босс 39-49 (в реальном GPU-браузере выше; адаптивный свет компенсирует просадки).
+   474→
